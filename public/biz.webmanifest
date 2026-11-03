@@ -1,0 +1,48 @@
+{
+  "name": "Bitinary Business",
+  "short_name": "Bitinary Biz",
+  "description": "Manage your food or tourism business: Quick Update, stats, posts, reviews and growth tips from Jimbot. / Pamahalaan ang negosyo mo kasama si Jimbot.",
+  "lang": "en",
+  "start_url": "biz",
+  "scope": ".",
+  "id": "biz",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FFF1E3",
+  "theme_color": "#3A1A0E",
+  "categories": [
+    "business",
+    "food",
+    "travel"
+  ],
+  "icons": [
+    {
+      "src": "icons/favicon-32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

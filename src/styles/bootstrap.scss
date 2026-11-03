@@ -1,0 +1,7 @@
+// Bootstrap lives in the lowest cascade layer, so Tailwind classes on React-Bootstrap
+// elements always win and the Bitinary design stays unchanged.
+@use 'sass:meta';
+
+@layer bootstrap {
+  @include meta.load-css('bootstrap-parts');
+}
