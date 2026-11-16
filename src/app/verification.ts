@@ -1,43 +1,92 @@
-import { useMemo } from 'react'
-import { sampleVerifications } from '@/data/verifications'
-import { LINKED_PLACE_ID, places } from '@/data/places'
-import { migrateVerification, type Verification } from '@/lib/verify'
-import { useBizSnapshot, writeBiz } from './bizBridge'
-import { useConsole } from './console'
+import { useCallback, useEffect, useState } from 'react'
+import { useStore } from './store'
+import { supabase } from '@/lib/supabase'
+import { emptyVerification, migrateVerification, type Verification } from '@/lib/verify'
 
-export type VerificationRow = { placeId: string; v: Verification; source: 'biz' | 'sample' }
+export type VerificationRow = {
+  placeId: string
+  name: string
+  city: string
+  image?: string
+  owner: string
+  contact: string
+  v: Verification
+}
 
-/** Every listed business with its verification: the /biz account for the linked place, sample records for the rest. */
-export function useVerifications(): VerificationRow[] {
-  const biz = useBizSnapshot()
-  const { c } = useConsole()
-  return useMemo(
-    () =>
-      places.map((p) =>
-        p.id === LINKED_PLACE_ID
-          ? { placeId: p.id, v: migrateVerification(biz.business.verification), source: 'biz' as const }
-          : { placeId: p.id, v: migrateVerification(c.verifications[p.id] ?? sampleVerifications[p.id]), source: 'sample' as const },
-      ),
-    [biz.business.verification, c.verifications],
-  )
+const UPDATED = 'bitinary:console-verifications-updated'
+
+export function useVerifications() {
+  const [rows, setRows] = useState<VerificationRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const { showToast } = useStore()
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      const { data, error } = await supabase
+        .from('businesses')
+        .select('id,name,city,cover_url,verification_status,verification_method,verification_files,onsite_date,verification_data,owner:profiles!businesses_owner_id_fkey(name,mobile)')
+        .order('created_at', { ascending: false })
+      if (!active) return
+      if (error) {
+        setLoading(false)
+        showToast({ text: `Could not load database verification records: ${error.message}`, expression: 'unsure' })
+        return
+      }
+
+      setRows((data ?? []).map((business) => {
+        const owner = business.owner as { name?: string; mobile?: string } | null
+        const fallback = {
+          ...emptyVerification,
+          status: business.verification_status ?? 'none',
+          method: business.verification_method ?? undefined,
+          onsiteDate: business.onsite_date ?? undefined,
+          files: business.verification_files ?? [],
+        }
+        const saved = business.verification_data as Partial<Verification> | null
+        const hasSavedVerification = !!saved && Object.keys(saved).length > 0
+        return {
+          placeId: business.id,
+          name: business.name,
+          city: business.city || '—',
+          image: business.cover_url ?? undefined,
+          owner: owner?.name || 'No name set',
+          contact: owner?.mobile ? `+63 ${owner.mobile}` : '—',
+          v: migrateVerification(hasSavedVerification ? saved : fallback),
+        }
+      }))
+      setLoading(false)
+    }
+
+    const refresh = () => {
+      setLoading(true)
+      void load()
+    }
+    void load()
+    window.addEventListener(UPDATED, refresh)
+    return () => {
+      active = false
+      window.removeEventListener(UPDATED, refresh)
+    }
+  }, [showToast])
+
+  return { rows, loading }
 }
 
 export function useVerificationOf(placeId: string) {
-  return useVerifications().find((r) => r.placeId === placeId)?.v
+  return useVerifications().rows.find((row) => row.placeId === placeId)?.v
 }
 
-/** Save a reviewer decision; the linked business also gets a notification in /biz. */
+/** Save a review decision to the business record and notify its owner. */
 export function useSaveVerification() {
-  const { update } = useConsole()
-  return (placeId: string, v: Verification, notif?: { tl: string; en: string }) => {
-    if (placeId === LINKED_PLACE_ID) {
-      return writeBiz((d) => ({
-        ...d,
-        business: { ...d.business, verification: v },
-        notifs: notif ? [{ id: `n-${Date.now()}`, kind: 'report', at: new Date().toISOString(), to: '/biz/stats/backgrounds#verify', ...notif }, ...d.notifs] : d.notifs,
-      }))
-    }
-    update((x) => ({ ...x, verifications: { ...x.verifications, [placeId]: v } }))
-    return true
-  }
+  return useCallback(async (businessId: string, verification: Verification, notification?: { tl: string; en: string }) => {
+    const { error } = await supabase.rpc('set_dev_console_business_verification', {
+      p_business_id: businessId,
+      p_verification: verification,
+      p_notification: notification ?? null,
+    })
+    if (error) return { error: error.message }
+    window.dispatchEvent(new Event(UPDATED))
+    return { error: null }
+  }, [])
 }

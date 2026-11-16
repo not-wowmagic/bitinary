@@ -149,7 +149,7 @@ const demoHours = emptyBusiness.hours as Record<string, DayHours>
 export function OnboardingKitDemo() {
   const { lang } = useLang()
   const [price, setPrice] = useState('₱₱')
-  const [pin, setPin] = useState<{ x: number; y: number } | undefined>({ x: 48, y: 52 })
+  const [pin, setPin] = useState<{ lng: number; lat: number } | undefined>({ lng: 120.9842, lat: 14.5995 })
   const [hours, setHours] = useState(demoHours)
   const [menu, setMenu] = useState<MenuItem[]>([{ id: 'x', name: 'Sisig', price: '180', category: 'Ulam' }])
   return (

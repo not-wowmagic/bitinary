@@ -19,6 +19,7 @@ type Store = {
   addStop: (itId: string, stop: Stop) => void
   myMoments: Moment[]
   addMoment: (m: Moment) => boolean
+  removeMoment: (id: string) => void
   dataSaver: boolean
   setDataSaver: (v: boolean) => void
   subtitles: boolean
@@ -87,6 +88,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     [setMoments],
   )
+  const removeMoment = useCallback((id: string) => setMoments((list) => list.filter((moment) => moment.id !== id)), [setMoments])
 
   const resetAll = useCallback(() => {
     setOnboarded(false)
@@ -111,6 +113,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addStop,
       myMoments,
       addMoment,
+      removeMoment,
       dataSaver,
       setDataSaver,
       subtitles,
@@ -126,9 +129,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setPanel,
       resetAll,
     }),
-    [onboarded, setOnboarded, saved, toggleSaved, savedItineraries, saveItinerary, itineraryStops, setItineraryStops, addStop, myMoments, addMoment, dataSaver, setDataSaver, subtitles, setSubtitles, installDismissed, setInstallDismissed, cameraTipSeen, setCameraTipSeen, toast, showToast, dismissToast, panel, resetAll],
+    [onboarded, setOnboarded, saved, toggleSaved, savedItineraries, saveItinerary, itineraryStops, setItineraryStops, addStop, myMoments, addMoment, removeMoment, dataSaver, setDataSaver, subtitles, setSubtitles, installDismissed, setInstallDismissed, cameraTipSeen, setCameraTipSeen, toast, showToast, dismissToast, panel, resetAll],
   )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+}
+
+export function useOptionalStore() {
+  return useContext(Ctx)
 }
 
 export function useStore() {

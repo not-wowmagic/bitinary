@@ -1,4 +1,4 @@
-import { Bell, Check, ChevronDown, CloudOff, Globe, Moon, Plus, Sun, TriangleAlert, Zap } from 'lucide-react'
+import { Bell, Check, ChevronDown, CloudOff, Download, Globe, Moon, Plus, Share, SquarePlus, Sun, TriangleAlert, Zap } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useState } from 'react'
 import { Link, Navigate, Outlet, ScrollRestoration, useLocation, useNavigate } from 'react-router'
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button'
 import { Sheet } from '@/components/ui/Sheet'
 import { cn } from '@/lib/cn'
 import { isEmbed } from '@/lib/forced'
+import { useInstallPrompt } from '@/lib/useInstallPrompt'
 import { useOnline } from '@/lib/useOnline'
 import { relTime } from './format'
 import { ContentIcon, FoxIcon, SearchIcon, StatsIcon, UserIcon } from './icons'
@@ -20,11 +21,17 @@ import { Avatar, BizStatusChip } from './ui'
 const FREE = /^\/biz\/(language|welcome|auth|signup|screens)/
 
 function BizGate() {
-  const { d } = useBiz()
+  const { d, loading, loadError, retryLoad, t } = useBiz()
   const { pathname, search } = useLocation()
+  if (loading) return <main className="grid min-h-screen place-items-center p-6 text-center" role="status">{t('Kinukuha ang datos ng negosyo…', 'Loading business data…')}</main>
+  if (loadError) return <main className="grid min-h-screen place-items-center p-6 text-center"><div role="alert" className="max-w-md"><p>{loadError}</p><button className="mt-4 rounded-full bg-primary px-5 py-3 font-medium text-ink" onClick={retryLoad}>{t('Subukang muli', 'Retry')}</button></div></main>
   if (!isEmbed() && !new URLSearchParams(search).has('embed')) {
-    if (!d.langPref && !pathname.startsWith('/biz/language') && !pathname.startsWith('/biz/screens')) return <Navigate to="/biz/language" replace />
-    if (d.session && pathname.startsWith('/biz/auth')) return <Navigate to={d.business.name ? '/biz/stats' : '/biz/setup'} replace />
+    const authEntry = pathname === '/biz/auth' || pathname === '/biz/auth/email' || pathname === '/biz/auth/verify' || pathname === '/biz/auth/recovery' || pathname === '/biz/welcome'
+    const businessSignup = pathname === '/biz/auth' && new URLSearchParams(search).get('mode') === 'signup'
+    const passwordRecovery = pathname === '/biz/auth/recovery'
+    if (d.session && authEntry && !businessSignup && !passwordRecovery) return <Navigate to={d.business.name ? '/biz/stats' : '/biz/setup'} replace />
+    if (!d.session && !d.langPref && !pathname.startsWith('/biz/language') && !pathname.startsWith('/biz/screens') && pathname !== '/biz/auth/callback') return <Navigate to="/biz/language" replace />
+    if (d.session && pathname === '/biz/auth' && !search.includes('mode=')) return <Navigate to={d.business.name ? '/biz/stats' : '/biz/setup'} replace />
     if (d.langPref && !d.session && !FREE.test(pathname)) return <Navigate to="/biz/welcome" replace />
   }
   return (
@@ -241,41 +248,88 @@ export function LangSheet({ open, onClose }: { open: boolean; onClose: () => voi
 function TopBar({ onQuick, onLang, onBell }: { onQuick: () => void; onLang: () => void; onBell: () => void }) {
   const { d, t, status } = useBiz()
   const { resolved, setMode } = useTheme()
+  const install = useInstallPrompt()
+  const [installHelp, setInstallHelp] = useState(false)
   const unread = d.notifs.filter((n) => !n.read).length
+  const requestInstall = async () => {
+    if (install.canPrompt) {
+      await install.install()
+      return
+    }
+    setInstallHelp(true)
+  }
   return (
-    <div className="glass sticky top-0 z-30 border-x-0 border-t-0 pt-[env(safe-area-inset-top)]">
-      <div className="flex min-h-16 items-center gap-2 px-3 md:px-6">
-        <div className="flex min-w-0 flex-1 items-center gap-2.5 md:hidden">
-          <BusinessMark size={36} />
-          <div className="min-w-0">
-            <p className="truncate font-display text-[15px] font-semibold leading-tight">{d.business.name || 'Bitinary Business'}</p>
-            <BizStatusChip status={status} className="mt-0.5 h-6 px-2 text-[11px]" />
+    <>
+      <div className="glass sticky top-0 z-30 border-x-0 border-t-0 pt-[env(safe-area-inset-top)]">
+        <div className="flex min-h-16 items-center gap-2 px-3 md:px-6">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5 md:hidden">
+            <BusinessMark size={36} />
+            <div className="min-w-0">
+              <p className="truncate font-display text-[15px] font-semibold leading-tight">{d.business.name || 'Bitinary Business'}</p>
+              <BizStatusChip status={status} className="mt-0.5 h-6 px-2 text-[11px]" />
+            </div>
           </div>
-        </div>
-        <div className="hidden min-w-0 flex-1 md:block">
-          <BizStatusChip status={status} />
-        </div>
-        <span className="hidden sm:block">
-          <Button size="md" icon={<Zap size={18} />} onClick={onQuick}>
-            {t('Mabilis na Update', 'Quick Update')}
-          </Button>
-        </span>
-        <span className="sm:hidden">
-          <IconBtn label={t('Mabilis na Update', 'Quick Update')} onClick={onQuick}>
-            <Zap size={21} className="text-link" />
+          <div className="hidden min-w-0 flex-1 md:block">
+            <BizStatusChip status={status} />
+          </div>
+          {!install.isStandalone && (
+            <>
+              <span className="hidden sm:block">
+                <Button size="md" icon={<Download size={18} />} onClick={requestInstall}>
+                  {t('I-install', 'Install app')}
+                </Button>
+              </span>
+              <span className="sm:hidden">
+                <IconBtn label={t('I-install ang app', 'Install app')} onClick={requestInstall}>
+                  <Download size={21} className="text-link" />
+                </IconBtn>
+              </span>
+            </>
+          )}
+          <span className="hidden sm:block">
+            <Button size="md" icon={<Zap size={18} />} onClick={onQuick}>
+              {t('Mabilis na Update', 'Quick Update')}
+            </Button>
+          </span>
+          <span className="sm:hidden">
+            <IconBtn label={t('Mabilis na Update', 'Quick Update')} onClick={onQuick}>
+              <Zap size={21} className="text-link" />
+            </IconBtn>
+          </span>
+          <IconBtn label={t('Wika', 'Language')} onClick={onLang}>
+            <Globe size={21} strokeWidth={1.75} />
           </IconBtn>
-        </span>
-        <IconBtn label={t('Wika', 'Language')} onClick={onLang}>
-          <Globe size={21} strokeWidth={1.75} />
-        </IconBtn>
-        <IconBtn label={resolved === 'dark' ? t('Light mode', 'Light mode') : t('Dark mode', 'Dark mode')} onClick={() => setMode(resolved === 'dark' ? 'light' : 'dark')}>
-          {resolved === 'dark' ? <Sun size={21} strokeWidth={1.75} /> : <Moon size={21} strokeWidth={1.75} />}
-        </IconBtn>
-        <IconBtn label={t('Mga notification', 'Notifications')} onClick={onBell} badge={unread}>
-          <Bell size={21} strokeWidth={1.75} />
-        </IconBtn>
+          <IconBtn label={resolved === 'dark' ? t('Light mode', 'Light mode') : t('Dark mode', 'Dark mode')} onClick={() => setMode(resolved === 'dark' ? 'light' : 'dark')}>
+            {resolved === 'dark' ? <Sun size={21} strokeWidth={1.75} /> : <Moon size={21} strokeWidth={1.75} />}
+          </IconBtn>
+          <IconBtn label={t('Mga notification', 'Notifications')} onClick={onBell} badge={unread}>
+            <Bell size={21} strokeWidth={1.75} />
+          </IconBtn>
+        </div>
       </div>
-    </div>
+      <Sheet open={installHelp} onClose={() => setInstallHelp(false)} title={t('Idagdag sa Home Screen', 'Install Bitinary Business')}>
+        <ol className="space-y-3 text-body">
+          {install.isIOS ? (
+            <>
+              <li className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunken"><Share size={20} /></span>
+                {t('I-tap ang Share sa ibaba ng Safari.', 'Tap Share at the bottom of Safari.')}
+              </li>
+              <li className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunken"><SquarePlus size={20} /></span>
+                {t('Piliin ang Add to Home Screen.', 'Choose Add to Home Screen.')}
+              </li>
+            </>
+          ) : (
+            <>
+              <li>{t('Buksan ang menu ng browser.', 'Open your browser menu.')}</li>
+              <li>{t('Piliin ang Install app o Add to Home screen.', 'Choose Install app or Add to Home screen.')}</li>
+            </>
+          )}
+        </ol>
+        <Button block className="mt-5" onClick={() => setInstallHelp(false)}>{t('Sige', 'Done')}</Button>
+      </Sheet>
+    </>
   )
 }
 

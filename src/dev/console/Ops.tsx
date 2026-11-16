@@ -1,22 +1,17 @@
-import { BadgeCheck, Download, ExternalLink, EyeOff, FileUp, KeyRound, LayoutGrid, RotateCcw, Search, Sparkles, Star, Trash2, Undo2, Upload, Wrench } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router'
-import { useVerifications } from '@/app/verification'
-import { StateBadge } from './Verification'
-import { readBiz, writeBiz } from '@/app/bizBridge'
-import { FLAGS, useConsole, useCurrentDev, type Announcement } from '@/app/console'
+import { Download, ExternalLink, EyeOff, LayoutGrid, Search, Trash2, Undo2, Wrench } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router'
+import { FLAGS, initialConsole, useConsole, useCurrentDev, type Announcement } from '@/app/console'
 import { useStore } from '@/app/store'
-import { demoData } from '@/biz/store'
 import { IOSAlert } from '@/components/flow/IOSAlert'
 import { Button } from '@/components/ui/Button'
 import { Segmented } from '@/components/ui/Segmented'
 import { Sheet } from '@/components/ui/Sheet'
 import { Toggle } from '@/components/ui/Toggle'
-import { LINKED_PLACE_ID, places } from '@/data/places'
 import { cn } from '@/lib/cn'
-import { img } from '@/lib/format'
+import { supabase } from '@/lib/supabase'
 import { src } from '@/lib/media'
-import { STORAGE_BUDGET, fmtRel, kb, storageUsage, useModeration, type ModItem } from './data'
+import { fmtRel, refreshModeration, useModeration, type ModItem } from './data'
 import { Badge, Empty, Field, PageHead, Panel, download, field } from './ui'
 
 const APP = import.meta.env.BASE_URL
@@ -27,35 +22,40 @@ export function BusinessesPage() {
   const { c, update } = useConsole()
   const { showToast } = useStore()
   const [q, setQ] = useState('')
-  const [, force] = useState(0)
-  const ver = useVerifications()
-  const vOf = (id: string) => ver.find((r) => r.placeId === id)?.v
-  const list = places.filter((p) => !q.trim() || `${p.name} ${p.area} ${p.category}`.toLowerCase().includes(q.trim().toLowerCase()))
+  const [businesses, setBusinesses] = useState<null | {
+    id: string; name: string; business_type: string | null; price_range: string | null
+    city: string; live: boolean; verification_status: string; cover_url: string | null
+    reviews: { stars: number; hidden: boolean }[]
+  }[]>(null)
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      const { data, error } = await supabase
+        .from('businesses')
+        .select('id,name,business_type,price_range,city,live,verification_status,cover_url,reviews(stars,hidden)')
+        .order('created_at', { ascending: false })
+      if (!active) return
+      if (error) {
+        showToast({ text: `Couldn’t load businesses. Details: ${error.message}`, expression: 'unsure' })
+        return
+      }
+      setBusinesses(data ?? [])
+    }
+    void load()
+    return () => { active = false }
+  }, [showToast])
+
+  const list = (businesses ?? []).filter((business) =>
+    !q.trim() || `${business.name} ${business.city} ${business.business_type ?? ''}`.toLowerCase().includes(q.trim().toLowerCase()),
+  )
   const toggle = (key: 'featuredPlaces' | 'hiddenPlaces', id: string, name: string) => {
     const on = !c[key].includes(id)
     update((x) => ({ ...x, [key]: on ? [...x[key], id] : x[key].filter((y) => y !== id) }), { area: 'Businesses', action: `${on ? (key === 'featuredPlaces' ? 'Featured' : 'Hid') : key === 'featuredPlaces' ? 'Unfeatured' : 'Unhid'} ${name}`, target: id })
   }
-  const verify = (status: 'verified' | 'needs-docs' | 'none') => {
-    writeBiz((d) => ({
-      ...d,
-      business: { ...d.business, verification: { ...d.business.verification, status } },
-      notifs: [{ id: `n-${Date.now()}`, kind: 'report', at: new Date().toISOString(), to: '/biz/stats/backgrounds#verify', tl: status === 'verified' ? 'Verified na ang negosyo mo!' : status === 'needs-docs' ? 'Kailangan pa namin ng dokumento para sa beripikasyon.' : 'Na-reset ang beripikasyon mo.', en: status === 'verified' ? 'Your business is now verified!' : status === 'needs-docs' ? 'We need more documents to verify your business.' : 'Your verification was reset.' }, ...d.notifs],
-    }))
-    update((x) => x, { area: 'Businesses', action: `Set Kainan ni Mang Ben verification to ${status}`, target: LINKED_PLACE_ID })
-    showToast({ text: 'Verification updated. The owner got a notification.', expression: 'celebrating' })
-    force((n) => n + 1)
-  }
   return (
     <>
-      <PageHead title="Businesses" sub={`${places.length} listed · ${c.featuredPlaces.length} featured · ${c.hiddenPlaces.length} hidden`} />
-      <Link to="/bitinarydev/verification" className="card flex items-center gap-3 p-4">
-        <BadgeCheck size={22} className="shrink-0 text-link" />
-        <span className="min-w-0 flex-1">
-          <span className="block font-display text-[15px] font-semibold">DTI and Business permit verification</span>
-          <span className="block text-[13px] text-fg-2">{ver.filter((r) => r.v.status === 'pending').length} pending · review documents, dates and approve in Verification</span>
-        </span>
-        <ExternalLink size={17} className="text-fg-2" />
-      </Link>
+      <PageHead title="Businesses" sub={`${businesses?.length ?? '…'} database records · ${c.featuredPlaces.length} featured · ${c.hiddenPlaces.length} hidden`} />
       <Panel className="mt-4" pad={false}>
         <div className="border-b border-line p-4 md:p-5">
           <div className="relative">
@@ -63,27 +63,34 @@ export function BusinessesPage() {
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search businesses" aria-label="Search businesses" className={cn(field, 'pl-10')} />
           </div>
         </div>
-        <ul className="divide-y divide-line">
-          {list.map((p) => {
+        {list.length ? <ul className="divide-y divide-line">
+          {list.map((business) => {
+            const reviews = business.reviews.filter((review) => !review.hidden)
+            const rating = reviews.length ? reviews.reduce((sum, review) => sum + review.stars, 0) / reviews.length : null
+            const p = {
+              id: business.id,
+              name: business.name,
+              category: business.business_type || 'Uncategorized',
+              area: business.city || 'Location not set',
+            }
             const featured = c.featuredPlaces.includes(p.id)
             const hidden = c.hiddenPlaces.includes(p.id)
             return (
               <li key={p.id} className={cn('flex flex-wrap items-center gap-3 px-4 py-3 md:px-5', hidden && 'opacity-60')}>
-                <img src={img(p.image, 120, 120)} alt="" className="h-12 w-12 shrink-0 rounded-[12px] object-cover" loading="lazy" />
+                {business.cover_url
+                  ? <img src={business.cover_url} alt="" className="h-12 w-12 shrink-0 rounded-[12px] object-cover" loading="lazy" />
+                  : <div aria-hidden="true" className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[12px] bg-sunken font-display font-semibold text-fg-2">{p.name.slice(0, 1)}</div>}
                 <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-center gap-1.5 font-display text-[15px] font-semibold">
                     {p.name}
-                    {p.id === LINKED_PLACE_ID && <Badge tone="dark">Linked to /biz</Badge>}
                     {featured && <Badge tone="orange">Featured</Badge>}
                     {hidden && <Badge tone="caution">Hidden</Badge>}
-                    {vOf(p.id) && (
-                      <Link to={`/bitinarydev/verification/${p.id}`} onClick={(e) => e.stopPropagation()}>
-                        <StateBadge v={vOf(p.id)!} />
-                      </Link>
-                    )}
+                    <Badge tone={business.verification_status === 'verified' ? 'ok' : business.verification_status === 'pending' ? 'caution' : 'neutral'}>
+                      {business.verification_status === 'needs-docs' ? 'Needs documents' : business.verification_status || 'Not verified'}
+                    </Badge>
                   </p>
                   <p className="text-[13px] text-fg-2">
-                    {p.category} · {p.area} · <Star size={12} className="inline text-amber" fill="currentColor" strokeWidth={0} /> {p.rating} ({p.reviews}) · verified {p.verifiedDays}d ago
+                    {p.category} · {p.area} · {rating === null ? 'No reviews' : `★ ${rating.toFixed(1)} (${reviews.length})`} · {business.live ? 'Live' : 'Not published'}
                   </p>
                 </div>
                 <label className="flex items-center gap-2 text-[13px] font-medium">
@@ -100,7 +107,7 @@ export function BusinessesPage() {
               </li>
             )
           })}
-        </ul>
+        </ul> : <Empty title={businesses === null ? 'Loading businesses…' : 'No businesses yet'} body={businesses === null ? undefined : 'Business profiles will appear here when they’re added.'} />}
       </Panel>
     </>
   )
@@ -118,7 +125,7 @@ export function ModerationPage() {
   const [params, setParams] = useSearchParams()
   const kind = (params.get('kind') as 'review' | 'comment' | null) ?? 'all'
   const flagged = params.has('flagged')
-  const [source, setSource] = useState<'all' | 'traveler' | 'sample' | 'biz'>('all')
+  const [source, setSource] = useState<'all' | 'traveler' | 'biz'>('all')
   const [showRemoved, setShowRemoved] = useState(false)
   const [q, setQ] = useState('')
   const [target, setTarget] = useState<ModItem | null>(null)
@@ -132,12 +139,35 @@ export function ModerationPage() {
     () => items.filter((m) => (kind === 'all' || m.kind === kind) && (!flagged || m.flags.length > 0) && (source === 'all' || m.source === source) && (showRemoved ? !!m.removed : !m.removed) && (!q.trim() || `${m.text} ${m.nick} ${m.placeName}`.toLowerCase().includes(q.trim().toLowerCase()))),
     [items, kind, flagged, source, showRemoved, q],
   )
-  const remove = (m: ModItem, reason: string) => {
+  const remove = async (m: ModItem, reason: string) => {
+    const { error } = await supabase.rpc('set_dev_console_content_hidden', {
+      p_item_id: m.id,
+      p_kind: m.kind,
+      p_hidden: true,
+    })
+    if (error) {
+      showToast({ text: `Couldn’t hide this ${m.kind}. Details: ${error.message}`, expression: 'unsure' })
+      return
+    }
     update((x) => ({ ...x, removed: [{ id: m.id, kind: m.kind, reason, at: new Date().toISOString(), by: dev?.name }, ...x.removed.filter((r) => r.id !== m.id)] }), { area: 'Moderation', action: `Removed ${m.kind} by ${m.nick} on ${m.placeName} (${reason})`, target: m.authorId })
     setTarget(null)
-    showToast({ text: `Removed. It's hidden for everyone.`, expression: 'pointing' })
+    refreshModeration()
+    showToast({ text: `${m.kind === 'review' ? 'Review' : 'Comment'} removed and hidden from everyone.`, expression: 'pointing' })
   }
-  const restore = (m: ModItem) => update((x) => ({ ...x, removed: x.removed.filter((r) => r.id !== m.id) }), { area: 'Moderation', action: `Restored ${m.kind} by ${m.nick} on ${m.placeName}`, target: m.authorId })
+  const restore = async (m: ModItem) => {
+    const { error } = await supabase.rpc('set_dev_console_content_hidden', {
+      p_item_id: m.id,
+      p_kind: m.kind,
+      p_hidden: false,
+    })
+    if (error) {
+      showToast({ text: `Couldn’t restore this ${m.kind}. Details: ${error.message}`, expression: 'unsure' })
+      return
+    }
+    update((x) => ({ ...x, removed: x.removed.filter((r) => r.id !== m.id) }), { area: 'Moderation', action: `Restored ${m.kind} by ${m.nick} on ${m.placeName}`, target: m.authorId })
+    refreshModeration()
+    showToast({ text: `${m.kind === 'review' ? 'Review' : 'Comment'} restored.`, expression: 'celebrating' })
+  }
 
   return (
     <>
@@ -154,7 +184,6 @@ export function ModerationPage() {
               <option value="all">All sources</option>
               <option value="traveler">Written by travelers</option>
               <option value="biz">Bitinary Business data</option>
-              <option value="sample">Sample data</option>
             </select>
             <label className="flex items-center gap-2 text-[14px] font-medium">
               <Toggle label="Flagged only" checked={flagged} onChange={(v) => setParam('flagged', v ? '1' : null)} /> Flagged only
@@ -172,7 +201,6 @@ export function ModerationPage() {
                   <p className="flex flex-wrap items-center gap-1.5 text-[13px] text-fg-2">
                     <Badge tone={m.kind === 'review' ? 'orange' : 'neutral'}>{m.kind === 'review' ? `Review${m.stars ? ` · ${m.stars}★` : ''}` : 'Comment'}</Badge>
                     <b className="text-fg">{m.nick}</b> on {m.placeName} · {fmtRel(m.at)}
-                    {m.source === 'sample' && <Badge>Sample</Badge>}
                     {m.flags.map((f) => (
                       <Badge key={f} tone="caution">
                         {f}
@@ -207,7 +235,7 @@ export function ModerationPage() {
             ))}
           </ul>
         ) : (
-          <Empty title={showRemoved ? 'Nothing removed' : 'All clear'} body={showRemoved ? 'Removed reviews and comments show here.' : 'No reviews or comments match these filters.'} />
+          <Empty title={showRemoved ? 'No removed content' : 'No matching content'} body={showRemoved ? 'Reviews and comments you remove will appear here.' : 'Try changing your filters or search terms.'} />
         )}
       </Panel>
       <Sheet open={!!target} onClose={() => setTarget(null)} title="Why remove this?">
@@ -238,11 +266,11 @@ export function AnnouncementsPage() {
     const next = { ...a, id: a.text !== c.announcement.text ? `a${Date.now()}` : a.id }
     update((x) => ({ ...x, announcement: next }), { area: 'Announcements', action: next.on ? `Published announcement "${next.text.slice(0, 50)}"` : 'Turned the announcement off' })
     setA(next)
-    showToast({ text: next.on ? 'Announcement is live' : 'Announcement saved (off)', expression: 'celebrating' })
+    showToast({ text: next.on ? 'Announcement published.' : 'Announcement turned off.', expression: 'celebrating' })
   }
   const saveM = () => {
     update((x) => ({ ...x, maintenance: m }), { area: 'Announcements', action: m.on ? 'Turned maintenance mode on' : 'Saved maintenance settings (off)' })
-    showToast({ text: m.on ? 'Maintenance mode is on' : 'Maintenance settings saved', expression: m.on ? 'sleeping' : 'celebrating' })
+    showToast({ text: m.on ? 'Maintenance mode enabled.' : 'Maintenance settings saved.', expression: m.on ? 'sleeping' : 'celebrating' })
   }
   return (
     <>
@@ -299,7 +327,7 @@ export function FlagsPage() {
   const { c, update } = useConsole()
   return (
     <>
-      <PageHead title="Feature flags" sub="Turn features on or off for everyone using the app on this device." />
+      <PageHead title="Feature flags" sub="Database-backed settings apply to everyone using the app." />
       <Panel pad={false}>
         <ul className="divide-y divide-line">
           {FLAGS.map((f) => (
@@ -322,140 +350,39 @@ export function FlagsPage() {
 
 /* ------------------------------ Data tools ------------------------------ */
 
-const TRAVELER_KEYS = ['session', 'role', 'profile2', 'consent2', 'prefs2', 'business2', 'setupDone2', 'resume', 'hasAccount', 'accounts2', 'authAttempts', 'authLockedUntil', 'onboarded', 'saved', 'savedItineraries', 'itineraryStops', 'moments', 'dataSaver', 'subtitles', 'installDismissed', 'cameraTipSeen', 'lang', 'announcementsDismissed']
-const allKeys = () => Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)!).filter((k) => k?.startsWith('bitinary:'))
-const put = (k: string, v: unknown) => localStorage.setItem(`bitinary:${k}`, JSON.stringify(v))
-
-type Action = { id: string; title: string; body: string; run: () => void }
+type Action = { id: string; title: string; body: string; run: () => void | Promise<void> }
 
 export function DataToolsPage() {
   const { c, update } = useConsole()
-  const { showToast } = useStore()
   const [confirm, setConfirm] = useState<Action | null>(null)
-  const [importing, setImporting] = useState<{ data: Record<string, string>; name: string } | null>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
-  const usage = storageUsage()
-  const pct = Math.min(100, Math.round((usage.total / STORAGE_BUDGET) * 100))
-
-  const logThenReload = (action: string, fn: () => void) => {
-    update((x) => x, { area: 'Data', action })
-    // Let the log write land before clearing and reloading.
-    setTimeout(() => {
-      fn()
+  const reset: Action = {
+    id: 'console',
+    title: 'Reset console data',
+    body: 'Resets database-backed console settings and operations state. Auth users, profiles, businesses and content are not deleted.',
+    run: async () => {
+      await update((x) => ({ ...initialConsole, devAccounts: x.devAccounts, devSession: x.devSession }), { area: 'Data', action: 'Reset console data' })
       location.reload()
-    }, 50)
-  }
-  const keepConsole = () => {
-    const raw = localStorage.getItem('bitinary:console')
-    return () => raw && localStorage.setItem('bitinary:console', raw)
-  }
-  const actions: Action[] = [
-    { id: 'traveler', title: 'Reset traveler data', body: 'Signs everyone out and clears accounts, saved places, trips and Moments on this device.', run: () => logThenReload('Reset traveler data', () => TRAVELER_KEYS.forEach((k) => localStorage.removeItem(`bitinary:${k}`))) },
-    { id: 'biz', title: 'Reset business data', body: 'Clears the Bitinary Business account, posts, reviews and replies.', run: () => logThenReload('Reset business data', () => localStorage.removeItem('bitinary:biz')) },
-    { id: 'social', title: 'Reset reviews & comments', body: "Clears travelers' reviews, comments and likes for places without a business account.", run: () => logThenReload('Reset reviews and comments', () => localStorage.removeItem('bitinary:social')) },
-    {
-      id: 'console',
-      title: 'Reset console',
-      body: 'Restores default banners, theme, flags and announcements. Keeps developer accounts and keeps you signed in.',
-      run: () => logThenReload('Reset console', () => localStorage.setItem('bitinary:console', JSON.stringify({ devAccounts: c.devAccounts, devSession: c.devSession }))),
     },
-    {
-      id: 'factory',
-      title: 'Factory reset',
-      body: 'Deletes everything Bitinary saved on this device, including developer accounts (the demo accounts come back) and the log.',
-      run: () => {
-        allKeys().forEach((k) => localStorage.removeItem(k))
-        location.reload()
-      },
-    },
-  ]
-
-  const loadDemo = () =>
-    logThenReload('Loaded the full demo', () => {
-      const restore = keepConsole()
-      const now = new Date().toISOString()
-      put('session', { kind: 'user', role: 'traveler', method: 'email', accountId: 'acc-andrea' })
-      put('role', 'traveler')
-      put('setupDone2', true)
-      put('hasAccount', true)
-      put('resume', null)
-      put('lang', 'tl')
-      put('profile2', { name: 'Andrea Reyes', nickname: 'Andrea', email: 'andrea@example.ph', mobile: '9171234567', city: 'Maynila' })
-      put('biz', { ...demoData, reviews: [{ id: 'rv-demo', nick: 'Andrea', authorId: 'acc-andrea', stars: 5, text: 'Ang sarap ng kare-kare! Mabilis din ang serve at mabait ang staff.', photos: [], at: now, checkin: { at: now, via: 'code' }, fresh: true }, ...demoData.reviews] })
-      put('social', { reviews: [{ id: 'rv-demo2', placeId: 'p2', nick: 'Andrea', authorId: 'acc-andrea', stars: 4, text: 'Masarap ang kapeng barako, tahimik na lugar para magtrabaho.', photos: [], at: now, visited: true }], comments: [{ id: 'cm-demo', postId: 'p2-ph0', nick: 'Andrea', authorId: 'acc-andrea', text: 'Pupunta ako bukas!', at: now }], liked: [] })
-      restore()
-    })
-
-  const exportAll = () => {
-    const data = Object.fromEntries(allKeys().map((k) => [k, localStorage.getItem(k) ?? '']))
-    download(`bitinary-snapshot-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ app: 'bitinary', exportedAt: new Date().toISOString(), data }, null, 2), 'application/json')
-    update((x) => x, { area: 'Data', action: 'Exported a snapshot' })
   }
-  const readImport = async (f?: File) => {
-    if (!f) return
-    try {
-      const json = JSON.parse(await f.text())
-      const data = json?.data
-      if (json?.app !== 'bitinary' || !data || typeof data !== 'object' || !Object.keys(data).every((k) => k.startsWith('bitinary:') && typeof data[k] === 'string')) throw new Error('bad')
-      setImporting({ data, name: f.name })
-    } catch {
-      showToast({ text: "That file isn't a Bitinary snapshot.", expression: 'unsure' })
-    }
+  const exportState = () => {
+    download(`bitinary-console-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ app: 'bitinary-console', exportedAt: new Date().toISOString(), state: c }, null, 2), 'application/json')
+    update((x) => x, { area: 'Data', action: 'Exported console state' })
   }
 
   return (
     <>
-      <PageHead title="Data tools" sub="Everything is stored in this browser. Nothing is sent to a server." />
+      <PageHead title="Data tools" sub="Export and manage console data stored in Supabase. Auth credentials are never included." />
       <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-        <div className="space-y-4">
-          <Panel title="Storage" sub={`${kb(usage.total)} of about 5 MB used`}>
-            <div className="h-3 overflow-hidden rounded-full bg-sunken dark:bg-elevated" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Storage used">
-              <div className={cn('h-full rounded-full', pct > 80 ? 'bg-danger' : pct > 60 ? 'bg-caution' : 'bg-primary')} style={{ width: `${Math.max(2, pct)}%` }} />
-            </div>
-            <ul className="mt-4 space-y-1.5 text-[14px]">
-              {usage.keys.slice(0, 10).map((k) => (
-                <li key={k.key} className="flex justify-between gap-3">
-                  <span className="truncate font-mono text-[13px] text-fg-2">{k.key}</span>
-                  <span className="tabular-nums">{kb(k.bytes)}</span>
-                </li>
-              ))}
-            </ul>
-            {pct > 80 && <p className="mt-3 text-[13px] font-semibold text-danger">Storage is almost full. Photo reviews and uploads may fail.</p>}
-          </Panel>
-          <Panel title="Snapshots" sub="Save the whole app state to a file, or bring one back.">
-            <div className="flex flex-wrap gap-2">
-              <Button icon={<Download size={17} />} onClick={exportAll}>
-                Export JSON
-              </Button>
-              <Button variant="secondary" icon={<Upload size={17} />} onClick={() => fileRef.current?.click()}>
-                Import JSON
-              </Button>
-              <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => (readImport(e.target.files?.[0]), (e.target.value = ''))} />
-            </div>
-          </Panel>
-        </div>
-        <div className="space-y-4">
-          <Panel title="Demo">
-            <p className="text-[14px] text-fg-2">Signs in Andrea (traveler), loads the Kainan ni Mang Ben business with posts and reviews, and adds a few of Andrea's reviews and comments.</p>
-            <Button className="mt-3" icon={<Sparkles size={17} />} onClick={() => setConfirm({ id: 'demo', title: 'Load the full demo?', body: 'This replaces the current traveler and business data on this device.', run: loadDemo })}>
-              Load full demo
-            </Button>
-          </Panel>
-          <Panel title="Reset" pad={false}>
-            <ul className="divide-y divide-line">
-              {actions.map((a) => (
-                <li key={a.id} className="flex items-center gap-3 px-4 py-3 md:px-5">
-                  <div className="min-w-0 flex-1">
-                    <p className={cn('font-display text-[15px] font-semibold', a.id === 'factory' && 'text-danger')}>{a.title}</p>
-                    <p className="text-[13px] text-fg-2">{a.body}</p>
-                  </div>
-                  <Button size="sm" variant={a.id === 'factory' ? 'danger' : 'secondary'} icon={<Trash2 size={15} />} onClick={() => setConfirm(a)}>
-                    Reset
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </Panel>
+        <Panel title="Database snapshot" sub="Exports the currently loaded developer-console state as JSON.">
+          <Button icon={<Download size={17} />} onClick={exportState}>Export console state</Button>
+        </Panel>
+        <Panel title="Reset console data">
+          <p className="text-[14px] text-fg-2">{reset.body}</p>
+          <Button className="mt-3" variant="danger" icon={<Trash2 size={15} />} onClick={() => setConfirm(reset)}>
+            Reset console data
+          </Button>
+        </Panel>
+        <div className="lg:col-span-2">
           <Panel title="Review tools">
             <div className="flex flex-wrap gap-2">
               {[
@@ -478,25 +405,7 @@ export function DataToolsPage() {
         message={confirm?.body}
         actions={[
           { label: 'Cancel', onClick: () => setConfirm(null) },
-          { label: confirm?.id === 'demo' ? 'Load' : 'Reset', destructive: confirm?.id !== 'demo', bold: true, onClick: () => (confirm?.run(), setConfirm(null)) },
-        ]}
-      />
-      <IOSAlert
-        open={!!importing}
-        title="Import this snapshot?"
-        message={importing ? `${importing.name} has ${Object.keys(importing.data).length} saved items. It replaces everything Bitinary saved on this device, then reloads.` : ''}
-        actions={[
-          { label: 'Cancel', onClick: () => setImporting(null) },
-          {
-            label: 'Import',
-            bold: true,
-            onClick: () => {
-              if (!importing) return
-              allKeys().forEach((k) => localStorage.removeItem(k))
-              Object.entries(importing.data).forEach(([k, v]) => localStorage.setItem(k, v))
-              location.reload()
-            },
-          },
+          { label: 'Reset', destructive: true, bold: true, onClick: () => (confirm?.run(), setConfirm(null)) },
         ]}
       />
     </>
@@ -517,7 +426,7 @@ export function ActivityLogPage() {
     <>
       <PageHead
         title="Activity log"
-        sub={`Last ${c.log.length} console actions on this device`}
+        sub={`Last ${c.log.length} database-backed console actions`}
         actions={
           <>
             <select aria-label="Area" value={area} onChange={(e) => setArea(e.target.value)} className={cn(field, 'w-auto')}>
@@ -555,7 +464,7 @@ export function ActivityLogPage() {
             ))}
           </ul>
         ) : (
-          <Empty title="Nothing logged yet" body="Banner edits, user actions, theme changes and resets show up here." />
+          <Empty title="No activity yet" body="Banner edits, user actions, theme changes, and resets will appear here." />
         )}
       </Panel>
       <IOSAlert

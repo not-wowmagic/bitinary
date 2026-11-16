@@ -1,13 +1,25 @@
 import { motion } from 'motion/react'
 import { Link, useLocation } from 'react-router'
 import { cn } from '@/lib/cn'
+import { useLang } from '@/app/i18n'
 import { tabs } from './nav'
 
 export function GlassTabBar({ tone = 'default' }: { tone?: 'default' | 'dark' }) {
   const { pathname } = useLocation()
+  const { t } = useLang()
+  const label = (to: string) => {
+    const labels: Record<string, [string, string]> = {
+      '/': ['Home', 'Home'],
+      '/jimbot': ['Jimbot', 'Jimbot'],
+      '/search': ['Hanap', 'Search'],
+      '/moments': ['Moments', 'Moments'],
+      '/account': ['Account', 'Account'],
+    }
+    return t(...labels[to])
+  }
   return (
     <nav
-      aria-label="Pangunahing navigation"
+      aria-label={t('Pangunahing nabigasyon', 'Main navigation')}
       className="pointer-events-none fixed inset-x-0 bottom-0 z-50 px-3 pb-[max(10px,env(safe-area-inset-bottom))] md:hidden"
     >
       <ul
@@ -39,7 +51,7 @@ export function GlassTabBar({ tone = 'default' }: { tone?: 'default' | 'dark' })
                 <motion.span whileTap={{ scale: 0.88 }} className="relative">
                   <Icon active={active} />
                 </motion.span>
-                <span className="relative font-display text-[11px] font-medium leading-none">{t.label}</span>
+                <span className="relative font-display text-[11px] font-medium leading-none">{label(t.to)}</span>
               </Link>
             </li>
           )

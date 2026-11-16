@@ -10,7 +10,7 @@ import { PhaseTag } from '@/components/ui/PhaseTag'
 import { cn } from '@/lib/cn'
 import { WEEKDAYS, greeting, hourLabel, longDate, num } from '../format'
 import { QuickUpdatePanel } from '../QuickUpdate'
-import { stats } from '../seed'
+import { useBizStats } from '../statsService'
 import { useBiz, type Channel } from '../store'
 import { Card, KpiCard, PageHeader, SubTabs } from '../ui'
 
@@ -35,9 +35,9 @@ export const change = (a: number[]) => {
   return p ? ((week(a) - p) / p) * 100 : 0
 }
 
-export function bestSlot() {
+export function bestSlot(heat: number[][]) {
   let best = { d: 0, h: 0, v: 0 }
-  stats.heat.forEach((row, d) => row.forEach((v, h) => v > best.v && (best = { d, h, v })))
+  heat.forEach((row, d) => row.forEach((v, h) => v > best.v && (best = { d, h, v })))
   return best
 }
 
@@ -84,8 +84,12 @@ export function Overview() {
   const health = useHealth()
   const [tip, setTip] = useState(0)
   const draft = status === 'draft'
+  const dbStats = useBizStats({
+    businessId: d.business.id,
+    live: d.business.live,
+  })
   const z = (a: number[]) => (draft ? a.map(() => 0) : a)
-  const best = bestSlot()
+  const best = bestSlot(dbStats.heat)
   const unanswered = d.reviews.filter((r) => !r.reply && !r.caseId)
   const newComments = d.comments.filter((c) => c.fresh && !c.reply && !c.hidden)
   const openCases = d.cases.filter((c) => c.status === 'review' || c.status === 'info' || c.status === 'received')
@@ -117,6 +121,15 @@ export function Overview() {
         </section>
 
         <VerificationBanner />
+        {dbStats.error && (
+          <div role="alert" className="rounded-[16px] border border-danger/30 bg-danger-bg p-4 text-danger">
+            <p className="font-semibold">{t('Hindi ma-load ang analytics mula sa database.', 'Business analytics could not be loaded from the database.')}</p>
+            <p className="mt-1 break-words text-[14px]">{dbStats.error}</p>
+            <button type="button" className="mt-2 min-h-11 font-semibold underline underline-offset-2" onClick={dbStats.refresh}>
+              {t('Subukan ulit', 'Retry')}
+            </button>
+          </div>
+        )}
 
         <div className="grid gap-4 xl:grid-cols-12">
           <Card className="xl:col-span-5 xl:row-span-2" title={t('Mabilis na Update', 'Quick Update')} icon={<Zap size={20} />} phase="MVP" sub={d.quick.at ? t('Huling update: ngayong araw', 'Last update: today') : undefined}>
@@ -124,15 +137,15 @@ export function Overview() {
           </Card>
 
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:col-span-7 xl:grid-cols-3">
-            <KpiCard label={t('Views ng profile', 'Profile views')} value={week(z(stats.views))} delta={draft ? undefined : change(stats.views)} series={z(stats.views).slice(-14)} icon={<Eye size={18} />} to="/biz/stats/analytics" />
-            <KpiCard label={t('Mga save', 'Saves')} value={week(z(stats.saves))} delta={draft ? undefined : change(stats.saves)} series={z(stats.saves).slice(-14)} icon={<Bookmark size={18} />} to="/biz/stats/analytics?m=saves" />
-            <KpiCard label={t('Idinagdag sa trip plan', 'Added to trip plans')} value={week(z(stats.trips))} delta={draft ? undefined : change(stats.trips)} series={z(stats.trips).slice(-14)} icon={<Route size={18} />} to="/biz/stats/analytics?m=trips" />
-            <KpiCard label="Check-ins" value={week(z(stats.checkins))} delta={draft ? undefined : change(stats.checkins)} series={z(stats.checkins).slice(-14)} icon={<MapPin size={18} />} to="/biz/stats/analytics?m=checkins" />
-            <KpiCard label={t('Average na rating', 'Average rating')} value={draft ? '–' : stats.ratingAll.toFixed(1)} delta={draft ? undefined : 2.4} series={draft ? undefined : stats.rating} icon={<Star size={18} />} to="/biz/content/reviews" />
-            <KpiCard label={t('Bagong komento', 'New comments')} value={draft ? 0 : newComments.length + week(stats.comments)} delta={draft ? undefined : change(stats.comments)} series={z(stats.comments).slice(-14)} icon={<MessageCircle size={18} />} to="/biz/content/comments" />
+            <KpiCard label={t('Views ng profile', 'Profile views')} value={week(z(dbStats.views))} delta={draft ? undefined : change(dbStats.views)} series={z(dbStats.views).slice(-14)} icon={<Eye size={18} />} to="/biz/stats/analytics" />
+            <KpiCard label={t('Mga save', 'Saves')} value={week(z(dbStats.saves))} delta={draft ? undefined : change(dbStats.saves)} series={z(dbStats.saves).slice(-14)} icon={<Bookmark size={18} />} to="/biz/stats/analytics?m=saves" />
+            <KpiCard label={t('Idinagdag sa trip plan', 'Added to trip plans')} value={week(z(dbStats.trips))} delta={draft ? undefined : change(dbStats.trips)} series={z(dbStats.trips).slice(-14)} icon={<Route size={18} />} to="/biz/stats/analytics?m=trips" />
+            <KpiCard label="Check-ins" value={week(z(dbStats.checkins))} delta={draft ? undefined : change(dbStats.checkins)} series={z(dbStats.checkins).slice(-14)} icon={<MapPin size={18} />} to="/biz/stats/analytics?m=checkins" />
+            <KpiCard label={t('Average na rating', 'Average rating')} value={draft || dbStats.reviewCount === 0 ? '–' : dbStats.ratingAll.toFixed(1)} delta={draft ? undefined : 2.4} series={draft || dbStats.rating.length === 0 ? undefined : dbStats.rating} icon={<Star size={18} />} to="/biz/content/reviews" />
+            <KpiCard label={t('Bagong komento', 'New comments')} value={draft ? 0 : newComments.length + week(dbStats.comments)} delta={draft ? undefined : change(dbStats.comments)} series={z(dbStats.comments).slice(-14)} icon={<MessageCircle size={18} />} to="/biz/content/comments" />
           </div>
           <div className="xl:col-span-7">
-            <KpiCard label={t('Customers mula sa deals', 'Customers from deals')} value={verified ? week(stats.dealCustomers) : '–'} delta={verified ? change(stats.dealCustomers) : undefined} series={verified ? stats.dealCustomers.slice(-14) : undefined} icon={<Ticket size={18} />} to="/biz/stats/analytics#deals" sub={verified ? undefined : t('Bubukas pagka-verify', 'Unlocks after verification')} />
+            <KpiCard label={t('Customers mula sa deals', 'Customers from deals')} value={verified ? week(dbStats.dealCustomers) : '–'} delta={verified ? change(dbStats.dealCustomers) : undefined} series={verified ? dbStats.dealCustomers.slice(-14) : undefined} icon={<Ticket size={18} />} to="/biz/stats/analytics#deals" sub={verified ? undefined : t('Bubukas pagka-verify', 'Unlocks after verification')} />
           </div>
 
           <Card className="xl:col-span-4" title="Profile Health Score" icon={<Sparkles size={20} />} phase="MVP">
@@ -214,8 +227,8 @@ export function Overview() {
           <div className="grid gap-4 md:grid-cols-[1fr_1fr_1.4fr]">
             <div className="grid grid-cols-2 gap-2">
               {[
-                [t('Views', 'Views'), num(week(stats.views))],
-                [t('Mga save', 'Saves'), num(week(stats.saves))],
+                [t('Views', 'Views'), num(week(dbStats.views))],
+                [t('Mga save', 'Saves'), num(week(dbStats.saves))],
                 [t('Pinakamagandang araw', 'Best day'), day],
                 [t('Pinakamagandang oras', 'Best hour'), hourLabel(best.h)],
               ].map(([k, v]) => (

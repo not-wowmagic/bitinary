@@ -1,11 +1,12 @@
-import { ArrowRight, AtSign, Check, Globe, LogIn, Mail, PencilLine, Rocket, ShieldCheck, Smartphone, Sparkles } from 'lucide-react'
+import { ArrowRight, AtSign, Check, Globe, LogIn, Mail, PencilLine, Rocket, Smartphone, Sparkles } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
 import { DAYS, type BizThemeId, type BusinessProfile } from '@/app/account'
 import { FlowLayout } from '@/components/flow/FlowLayout'
-import { GoogleLogo, OtpInput, SelectCard, TextField } from '@/components/flow/Fields'
+import { GoogleLogo, PasswordField, SelectCard, StrengthMeter, TextField } from '@/components/flow/Fields'
+import { TermsConsentCard } from '@/components/auth/TermsConsentCard'
 import { Jimbot } from '@/components/mascot/Jimbot'
 import { HubLayout } from '@/components/onboarding/HubLayout'
 import { CompletenessRing, OptTag, ReqTag, SavedNote, StepHeader, ThemeCard } from '@/components/onboarding/Kit'
@@ -13,15 +14,20 @@ import { SuccessScreen } from '@/components/onboarding/Templates'
 import { Button } from '@/components/ui/Button'
 import { Segmented } from '@/components/ui/Segmented'
 import { PhaseTag } from '@/components/ui/PhaseTag'
-import { REQUIRED_BIZ, bizThemes, bizTypeOpts, dayLabel, label } from '@/data/themes'
+import { REQUIRED_BIZ, bizThemes, bizTypeOpts, dayLabel, getBizThemesForType, label } from '@/data/themes'
 import { cn } from '@/lib/cn'
 import { getForcedState, isEmbed } from '@/lib/forced'
+import { authRedirectUrl } from '@/lib/authRedirectUrl'
+import { resendSignupConfirmation, signInWithEmailPassword, signUpWithEmailPassword } from '@/lib/passwordAuth'
+import { AUTH_INTENT_KEY, AUTH_ROLE_KEY } from '@/lib/authFlow'
 import { useBreakpoint } from '@/lib/useMedia'
-import { mmss, useCountdown } from '@/lib/useCountdown'
 import { useOnline } from '@/lib/useOnline'
 import { supabase } from '@/lib/supabase'
+import { turnstileSiteKey } from '@/lib/turnstile'
 import { BizThemeForm } from '@/screens/business/BizThemes'
+import { PasswordRecoveryPage } from '@/screens/signup/PasswordRecovery'
 import { formatPH, validEmail } from '@/screens/signup/Signup'
+import { loadOwnedBusiness } from '../db/businesses'
 import { demoData, useBiz, type LangPref } from '../store'
 import { BizStatusChip } from '../ui'
 
@@ -133,30 +139,57 @@ export function BizWelcome() {
 
 export function BizMethod() {
   useResume()
-  const { t, set } = useBiz()
+  const { t, set, showToast } = useBiz()
   const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
   const online = useOnline()
   const mode = params.get('mode') === 'login' ? 'login' : 'signup'
+  const [acceptedTerms, setAcceptedTerms] = useState(false)
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    let active = true
+    void (async () => {
+      const { data, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError) {
+        showToast({ text: sessionError.message })
+        return
+      }
       const user = data.session?.user
-      if (!user) return
+      if (!user || !active) return
+      let keepSignupIntent = false
+      if (mode === 'signup' && user.user_metadata?.role !== 'business') {
+        const { error } = await supabase.auth.updateUser({ data: { role: 'business' } })
+        if (error) {
+          showToast({ text: `Could not save your account type: ${error.message}` })
+          keepSignupIntent = true
+        }
+      }
+      if (!active) return
       const email = user.email ?? ''
       set((x) => ({ ...x, session: { method: 'google', contact: email }, profile: { ...x.profile, google: email, email: x.profile.email || email } }))
+      if (!keepSignupIntent) {
+        sessionStorage.removeItem(AUTH_INTENT_KEY)
+        sessionStorage.removeItem(AUTH_ROLE_KEY)
+      }
       navigate(mode === 'login' ? '/biz/stats' : '/biz/signup/name', { replace: true })
-    })
-  }, [mode, navigate, set])
+    })()
+    return () => { active = false }
+  }, [mode, navigate, set, showToast])
   const google = async () => {
-    const appUrl = import.meta.env.VITE_APP_URL || window.location.origin
+    sessionStorage.setItem(AUTH_INTENT_KEY, mode)
+    if (mode === 'signup') sessionStorage.setItem(AUTH_ROLE_KEY, 'business')
+    else sessionStorage.removeItem(AUTH_ROLE_KEY)
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${appUrl.replace(/\/$/, '')}${import.meta.env.BASE_URL}biz/auth?mode=${mode}`, queryParams: { prompt: 'select_account' } },
+      options: { redirectTo: authRedirectUrl('biz/auth', { mode }), queryParams: { prompt: 'select_account' } },
     })
-    if (error) console.error('Google sign-in failed', error)
+    if (error) {
+      sessionStorage.removeItem(AUTH_INTENT_KEY)
+      sessionStorage.removeItem(AUTH_ROLE_KEY)
+      showToast({ text: `Google sign-in failed: ${error.message}` })
+    }
   }
   const Btn = ({ icon, l, sub, onClick }: { icon: React.ReactNode; l: string; sub: string; onClick: () => void }) => (
-    <motion.button whileTap={{ scale: 0.98 }} disabled={!online} onClick={onClick} className="flex min-h-[68px] w-full items-center gap-4 rounded-[20px] border border-line bg-surface px-4 text-left shadow-card disabled:opacity-50">
+    <motion.button whileTap={{ scale: 0.98 }} disabled={!online || (mode === 'signup' && !acceptedTerms)} onClick={onClick} className="flex min-h-[68px] w-full items-center gap-4 rounded-[20px] border border-line bg-surface px-4 text-left shadow-card disabled:opacity-50">
       <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-sunken">{icon}</span>
       <span className="flex-1">
         <span className="block font-display text-[16px] font-semibold">{l}</span>
@@ -166,14 +199,14 @@ export function BizMethod() {
   )
   return (
     <FlowLayout pose="waving" {...aside(t)} header={<StepHeader step={1} total={4} onBack={() => navigate('/biz/welcome')} />}>
-      <Segmented className="mt-1 w-full" value={mode} onChange={(m) => setParams({ mode: m }, { replace: true })} options={[{ value: 'signup', label: t('Gumawa ng account', 'Create account') }, { value: 'login', label: t('Mag-sign in', 'Sign in') }]} />
+      <Segmented className="mt-1 w-full" value={mode} onChange={(m) => { setAcceptedTerms(false); setParams({ mode: m }, { replace: true }) }} options={[{ value: 'signup', label: t('Gumawa ng account', 'Create account') }, { value: 'login', label: t('Mag-sign in', 'Sign in') }]} />
       <h1 className="mt-6 text-title">{mode === 'signup' ? t('Paano ka magsa-sign up?', 'How do you want to sign up?') : t('Maligayang pagbabalik!', 'Welcome back!')}</h1>
       {!online && <p className="mt-3 rounded-[16px] bg-danger-bg p-3 text-[15px] font-semibold text-danger">{t('Walang internet. Subukan ulit kapag may signal.', 'No internet. Try again when you have signal.')}</p>}
       <div className="mt-6 space-y-3">
         <Btn icon={<GoogleLogo size={22} />} l={t('Magpatuloy gamit ang Google', 'Continue with Google')} sub={t('Walang code na kailangan', 'No code needed')} onClick={google} />
-        <Btn icon={<Mail size={20} className="text-link" />} l={t('Gamit ang email', 'Continue with email')} sub={t('Code sa email', 'Code by email')} onClick={() => navigate(`/biz/auth/email?mode=${mode}`)} />
+        <Btn icon={<Mail size={20} className="text-link" />} l={t('Gamit ang email at password', 'Continue with email and password')} sub={t('Gumamit ng email at password', 'Use your email and password')} onClick={() => navigate(`/biz/auth/email?mode=${mode}`)} />
       </div>
-      <p className="mt-6 text-center text-[14px] text-fg-2">{t('Sa pagpapatuloy, sumasang-ayon ka sa Terms at Privacy Policy (RA 10173).', 'By continuing you agree to the Terms and Privacy Policy (RA 10173).')}</p>
+      {mode === 'signup' && <TermsConsentCard checked={acceptedTerms} onCheckedChange={setAcceptedTerms} t={t} />}
     </FlowLayout>
   )
 }
@@ -185,38 +218,77 @@ export function BizContact() {
   const navigate = useNavigate()
   const mode = params.get('mode') ?? 'signup'
   const [v, setV] = useState(getForcedState() === 'invalid' ? '81234' : '')
-  const [err, setErr] = useState(getForcedState() === 'invalid')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [err, setErr] = useState<string | null>(getForcedState() === 'invalid' ? 'invalid' : null)
   const ok = validEmail(v)
   const [busy, setBusy] = useState(false)
   const [captchaToken, setCaptchaToken] = useState<string>()
   const captchaRef = useRef<TurnstileInstance | null>(null)
   const go = async () => {
-    if (!ok) return setErr(true)
+    if (!ok) return setErr('invalid')
+    if (password.length < 8) return setErr('Use a password with at least 8 characters.')
+    if (mode === 'signup' && password !== confirmPassword) return setErr('Passwords do not match.')
     setBusy(true)
     const to = v.trim().toLowerCase()
-    const options = { shouldCreateUser: mode !== 'login', data: { role: 'business' }, ...(captchaToken ? { captchaToken } : {}) }
-    const { error } = await supabase.auth.signInWithOtp({ email: to, options })
-    setBusy(false)
-    if (error) {
+    try {
+      const result = mode === 'login'
+        ? await signInWithEmailPassword(to, password, captchaToken)
+        : await signUpWithEmailPassword(to, password, 'business', 'biz/auth/callback', captchaToken)
+      if (result.error) {
+        setErr(result.error)
+        return
+      }
+      if (mode === 'login' && result.user?.user_metadata?.role !== 'business') {
+        const businessResult = await loadOwnedBusiness()
+        if (businessResult.error) return setErr(businessResult.error)
+        if (!businessResult.data) {
+          await supabase.auth.signOut()
+          return setErr(t('Hindi pang-negosyo ang account na ito.', 'This is not a business account.'))
+        }
+      }
+      if (mode === 'signup' && !result.hasSession) {
+        navigate(`/biz/auth/verify?to=${encodeURIComponent(to)}&mode=signup`)
+      } else {
+        navigate(`/biz/auth?mode=${mode}`, { replace: true })
+      }
+    } catch (submitError: unknown) {
+      setErr(submitError instanceof Error ? submitError.message : 'Could not complete email authentication.')
+    } finally {
+      setBusy(false)
       captchaRef.current?.reset()
       setCaptchaToken(undefined)
-      return setErr(true)
     }
-    captchaRef.current?.reset()
-    setCaptchaToken(undefined)
-    navigate(`/biz/auth/verify?to=${encodeURIComponent(to)}&mode=${mode}`)
   }
+  const errorMessage = err === 'invalid'
+    ? t('Mukhang mali ang email.', "That email doesn't look right.")
+    : err === 'Passwords do not match.'
+      ? t('Hindi magkapareho ang password.', 'Passwords do not match.')
+      : err?.startsWith('Use a password')
+        ? t('Gumamit ng password na hindi bababa sa 8 character.', 'Use a password with at least 8 characters.')
+        : err
   return (
-    <FlowLayout pose="waving" {...aside(t)} header={<StepHeader step={1} total={4} onBack={() => navigate(`/biz/auth?mode=${mode}`)} />} footer={<Button block size="lg" disabled={!v || busy || (mode === 'signup' && !!import.meta.env.VITE_TURNSTILE_SITE_KEY && !captchaToken)} onClick={go}>{t('Ipadala ang code', 'Send code')}</Button>}>
+    <FlowLayout pose="waving" {...aside(t)} header={<StepHeader step={1} total={4} onBack={() => navigate(`/biz/auth?mode=${mode}`)} />} footer={<Button block size="lg" disabled={!v || password.length < 8 || (mode === 'signup' && password !== confirmPassword) || busy || (!!turnstileSiteKey && !captchaToken)} onClick={go}>{mode === 'signup' ? t('Gumawa ng account', 'Create account') : t('Mag-sign in', 'Sign in')}</Button>}>
       <div className="mt-2 flex h-16 w-16 items-center justify-center rounded-[20px] bg-primary text-ink"><AtSign size={30} /></div>
       <h1 className="mt-4 text-title">{t('Ano ang email mo?', "What's your email?")}</h1>
+      <p className="mt-1 text-body text-fg-2">{mode === 'signup' ? t('Gumawa ng business account gamit ang email at password.', 'Create your business account with an email and password.') : t('Mag-sign in gamit ang email at password mo.', 'Sign in with your email and password.')}</p>
       <div className="mt-6">
-        <TextField label="Email" type="email" autoFocus placeholder="ben@kainan.ph" value={v} onChange={(e) => (setV(e.target.value), setErr(false))} error={err ? t('Mukhang mali ang email.', "That email doesn't look right.") : null} />
-        {import.meta.env.VITE_TURNSTILE_SITE_KEY && (
+        <TextField label="Email" type="email" autoComplete="email" autoFocus placeholder="ben@kainan.ph" value={v} onChange={(e) => (setV(e.target.value), setErr(null))} error={err ? errorMessage : null} />
+        <div className="mt-4 space-y-3">
+          <PasswordField label={t('Password', 'Password')} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={(e) => (setPassword(e.target.value), setErr(null))} />
+          {mode === 'signup' && (
+            <>
+              <StrengthMeter password={password} />
+              <PasswordField label={t('Kumpirmahin ang password', 'Confirm password')} autoComplete="new-password" value={confirmPassword} onChange={(e) => (setConfirmPassword(e.target.value), setErr(null))} />
+            </>
+          )}
+        </div>
+        {turnstileSiteKey && (
           <div className="mt-4">
-            <Turnstile ref={captchaRef} siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY} onSuccess={setCaptchaToken} onExpire={() => setCaptchaToken(undefined)} onError={() => setCaptchaToken(undefined)} />
+            <Turnstile ref={captchaRef} siteKey={turnstileSiteKey} onSuccess={setCaptchaToken} onExpire={() => setCaptchaToken(undefined)} onError={() => setCaptchaToken(undefined)} />
           </div>
         )}
+        {mode === 'login' && <Button variant="secondary" className="mt-3" onClick={() => navigate(`/biz/auth/recovery?email=${encodeURIComponent(v.trim().toLowerCase())}`)}>{t('Nakalimutan ang password?', 'Forgot password?')}</Button>}
       </div>
       <SavedNote className="mt-6" />
     </FlowLayout>
@@ -226,57 +298,103 @@ export function BizContact() {
 export function BizVerify() {
   useResume()
   const [params] = useSearchParams()
-  const { t, set } = useBiz()
+  const { t } = useBiz()
   const navigate = useNavigate()
-  const forced = getForcedState()
   const to = params.get('to') ?? ''
   const mode = params.get('mode') ?? 'signup'
-  const [code, setCode] = useState('')
-  const [err, setErr] = useState<string | null>(forced === 'wrong' ? t('Mali ang code. May 4 pang subok.', 'Wrong code. 4 tries left.') : null)
-  const [tries, setTries] = useState(forced === 'locked' ? 5 : 0)
+  const [err, setErr] = useState<string | null>(null)
   const [resendAt, setResendAt] = useState(() => Date.now() + 30000)
-  const left = useCountdown(resendAt)
-  const locked = tries >= 5
+  const [busy, setBusy] = useState(false)
+  const [resendReady, setResendReady] = useState(false)
   useEffect(() => {
-    if (code.length < 6) return
-    const verify = async () => {
-      const { data, error } = await supabase.auth.verifyOtp({
-        email: to,
-        token: code,
-        type: 'email',
-      })
-      if (!error) {
-        const user = data.user
-        set((x) => ({ ...x, session: { method: 'email', contact: to }, profile: { ...x.profile, email: to, name: x.profile.name || String(user?.user_metadata?.name ?? '') } }))
-        navigate(mode === 'login' ? '/biz/stats' : '/biz/signup/name', { replace: true })
-        return
-      }
-      const n = tries + 1
-      setTries(n)
-      setErr(n >= 5 ? null : t(`Mali ang code. May ${5 - n} pang subok.`, `Wrong code. ${5 - n} tries left.`))
-      setCode('')
+    const timer = window.setTimeout(() => setResendReady(true), Math.max(0, resendAt - Date.now()))
+    return () => window.clearTimeout(timer)
+  }, [resendAt])
+
+  const resend = async () => {
+    setBusy(true)
+    setErr(null)
+    const { error } = await resendSignupConfirmation(to)
+    setBusy(false)
+    if (error) {
+      setErr(error)
+      return
     }
-    void verify()
-  }, [code]) // eslint-disable-line react-hooks/exhaustive-deps
+    setResendAt(Date.now() + 30000)
+    setResendReady(false)
+  }
   return (
     <FlowLayout pose="pointing" {...aside(t)} header={<StepHeader step={2} total={4} onBack={() => navigate(-1)} />}>
       <div className="mt-2 flex h-16 w-16 items-center justify-center rounded-[20px] bg-primary text-ink"><Mail size={30} /></div>
-      <h1 className="mt-4 text-title">{t('Ilagay ang 6-digit na code', 'Enter the 6-digit code')}</h1>
+      <h1 className="mt-4 text-title">{t('Kumpirmahin ang email mo', 'Confirm your email')}</h1>
       <p className="mt-1 text-body text-fg-2">
-        {t('Ipinadala sa', 'Sent to')} <b className="text-fg">{to}</b>
+        {t('Nagpadala kami ng verification email sa', 'We sent a verification email to')} <b className="text-fg">{to}</b>. {t('Buksan ito para kumpirmahin ang account mo.', 'Open it to confirm your account.')}
       </p>
-      <div className="mt-6">
-        <OtpInput value={code} onChange={(c) => (setCode(c), setErr(null))} error={!!err} disabled={locked} />
-        {err && <p role="alert" className="mt-3 text-[15px] font-semibold text-danger">{err}</p>}
-        {locked && <p role="alert" className="mt-3 rounded-[16px] bg-danger-bg p-3 text-[15px] font-semibold text-danger">{t('Masyadong maraming subok. Naka-lock nang 5 minuto.', 'Too many attempts. Locked for 5 minutes.')}</p>}
+      {err && <p role="alert" className="mt-4 text-[15px] font-semibold text-danger">{t(`Hindi maipadala ang email: ${err}`, `Could not send email: ${err}`)}</p>}
+      <p className="mt-4 rounded-[18px] bg-sunken p-4 text-[14px] text-fg-2 dark:bg-elevated">{t('Tingnan din ang spam o junk folder. Ang link ay para lang sa iyo.', 'Check your spam or junk folder too. The link is for you only.')}</p>
+      <div className="mt-5">
+        {resendReady ? <Button variant="secondary" size="sm" disabled={busy} onClick={() => void resend()}>{busy ? t('Ipinapadala…', 'Sending…') : t('Ipadala ulit ang email', 'Resend email')}</Button> : <p className="font-display text-[15px] text-fg-2">{t('Maghintay sandali bago humingi ng panibagong email.', 'Please wait a moment before requesting another email.')}</p>}
       </div>
-      <div className="mt-6">
-        {left > 0 ? <span className="font-display text-[15px] text-fg-2">{t(`Ipadala ulit sa ${mmss(left)}`, `Resend in ${mmss(left)}`)}</span> : <Button variant="secondary" size="sm" onClick={() => { void supabase.auth.signInWithOtp({ email: to, options: { shouldCreateUser: mode !== 'login', data: { role: 'business' } } }); setResendAt(Date.now() + 30000); setErr(null) }}>{t('Ipadala ulit', 'Resend code')}</Button>}
-      </div>
-      <p className="mt-8 flex items-start gap-3 rounded-[18px] bg-sunken p-4 text-[14px] text-fg-2 dark:bg-elevated">
-        <ShieldCheck size={20} className="shrink-0 text-ok" /> {t('Huwag ibigay ang code kahit kanino.', 'Never share this code with anyone.')}
-      </p>
     </FlowLayout>
+  )
+}
+
+export function BizPasswordRecovery() {
+  const { t } = useBiz()
+  return <PasswordRecoveryPage business t={t} />
+}
+
+export function BizAuthCallback() {
+  const [params] = useSearchParams()
+  const mode = params.get('mode') === 'login' ? 'login' : 'signup'
+  const to = params.get('to') ?? ''
+  const { t, d } = useBiz()
+  const navigate = useNavigate()
+  const [error, setError] = useState<string | null>(null)
+  const [checking, setChecking] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    void supabase.auth.getSession().then(async ({ data, error: sessionError }) => {
+      if (!active) return
+      if (sessionError) {
+        setError(sessionError.message)
+      } else if (!data.session) {
+        setError(t('Hindi valid o expired na ang verification email.', 'This verification email is invalid or expired.'))
+      } else {
+        const user = data.session.user
+        let isBusinessAccount = user.user_metadata?.role === 'business'
+        if (!isBusinessAccount) {
+          const businessResult = await loadOwnedBusiness()
+          if (businessResult.error) throw new Error(businessResult.error)
+          isBusinessAccount = !!businessResult.data
+        }
+        if (!active) return
+        if (!isBusinessAccount) {
+          setError(t('Hindi pang-negosyo ang account na ito. Gumamit ng business account o mag-sign up.', 'This is not a business account. Use a business account or sign up.'))
+        } else {
+          navigate(mode === 'login' ? '/biz/stats' : '/biz/signup/name', { replace: true })
+        }
+      }
+      setChecking(false)
+    }).catch((sessionError: unknown) => {
+      if (active) {
+        setError(sessionError instanceof Error ? sessionError.message : 'Could not verify the email.')
+        setChecking(false)
+      }
+    })
+    return () => { active = false }
+  }, [d.langPref, mode, navigate, t])
+
+  return (
+    <main className="grid min-h-dvh place-items-center bg-background px-5 py-10 text-fg">
+      <section role={error ? 'alert' : 'status'} className="w-full max-w-md rounded-[28px] bg-surface p-7 text-center shadow-card">
+        <Mail size={32} className="mx-auto text-primary" />
+        <h1 className="mt-4 text-h2">{checking ? t('Sinusuri ang verification…', 'Verifying your email…') : error ? t('Hindi makumpirma ang email', 'Could not verify email') : t('Tagumpay', 'Success')}</h1>
+        {error && <p className="mt-2 text-body text-fg-2">{error}</p>}
+        {error && <Button className="mt-5" onClick={() => navigate(mode === 'signup' && to ? `/biz/auth/verify?to=${encodeURIComponent(to)}&mode=signup` : `/biz/auth/email?mode=${mode}`, { replace: true })}>{mode === 'signup' ? t('Ipadala ulit ang verification email', 'Resend verification email') : t('Bumalik sa pag-sign in', 'Back to sign in')}</Button>}
+      </section>
+    </main>
   )
 }
 
@@ -347,7 +465,8 @@ export function BizSetupHub() {
   const b = d.business
   const req = REQUIRED_BIZ.filter((r) => b.status[r] === 'done').length
   const ready = req === 4
-  const done = bizThemes.filter((x) => b.status[x.id] === 'done').length
+  const businessThemes = getBizThemesForType(b.type)
+  const done = businessThemes.filter((x) => b.status[x.id] === 'done').length
   const onDone = () => navigate('/biz/setup', { replace: true })
   if (id && !desktop) return <BizThemeForm key={id} id={id} ctx={ctx} onDone={onDone} onBack={() => navigate('/biz/setup')} />
   const list = (
@@ -360,7 +479,7 @@ export function BizSetupHub() {
           </h1>
           <p className="mt-1 text-body text-fg-2">{ready ? t('Handa ka nang mag-live! Opsyonal ang iba.', 'You can go live now! The rest is optional.') : t(`${4 - req} na lang bago ka makapag-live. Awtomatikong nase-save.`, `${4 - req} more before you can go live. Progress saves automatically.`)}</p>
         </div>
-        <CompletenessRing value={done / bizThemes.length} size={92} caption={`${done}/${bizThemes.length}`} />
+        <CompletenessRing value={done / businessThemes.length} size={92} caption={`${done}/${businessThemes.length}`} />
       </section>
       {ready && !b.live && (
         <div className="mt-5 flex flex-wrap items-center gap-3 rounded-[24px] bg-primary p-4">
@@ -377,7 +496,7 @@ export function BizSetupHub() {
         <span className="ml-auto font-display text-[15px] font-semibold text-fg-2">{req}/4</span>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-1 xl:gap-2.5">
-        {bizThemes.filter((x) => x.required).map((x) => (
+        {businessThemes.filter((x) => x.required).map((x) => (
           <ThemeCard key={x.id} layout={desktop ? 'row' : 'tile'} icon={x.icon} title={x[lang]} minutes={x.minutes} status={b.status[x.id]} active={id === x.id} onClick={() => navigate(`/biz/setup/${x.id}`)} />
         ))}
       </div>
@@ -386,7 +505,7 @@ export function BizSetupHub() {
         <OptTag />
       </div>
       <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-1 xl:gap-2.5">
-        {bizThemes.filter((x) => !x.required).map((x) => (
+        {businessThemes.filter((x) => !x.required).map((x) => (
           <ThemeCard key={x.id} layout={desktop ? 'row' : 'tile'} icon={x.icon} title={x[lang]} minutes={x.minutes} status={b.status[x.id]} active={id === x.id} onClick={() => navigate(`/biz/setup/${x.id}`)} />
         ))}
       </div>

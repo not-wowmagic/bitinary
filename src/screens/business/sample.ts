@@ -1,32 +1,7 @@
-import { emptyBusiness, type BizThemeId, type BusinessProfile } from '@/app/account'
+import type { BizThemeId, BusinessProfile } from '@/app/account'
 import { REQUIRED_BIZ, bizThemes } from '@/data/themes'
-import { getForcedState, isEmbed } from '@/lib/forced'
 
-const sampleBase: BusinessProfile = {
-  ...emptyBusiness,
-  name: 'Kapihan ni Aling Nena',
-  type: 'kapihan',
-  price: '₱',
-  address: '45 Calle Real, Intramuros',
-  city: 'Maynila',
-  pin: { x: 50, y: 46 },
-  contactName: 'Nena Santos',
-  mobile: '9181234567',
-  menu: [
-    { id: 'a', name: 'Kapeng Barako', price: '85', category: 'Inumin' },
-    { id: 'b', name: 'Bibingka', price: '65', category: 'Merienda' },
-    { id: 'c', name: 'Puto bumbong', price: '70', category: 'Merienda' },
-  ],
-  status: { basics: 'done', location: 'done', hours: 'done', contact: 'done' },
-}
-
-/** Screen Index frames show sample data so every state is reviewable without clicking through. */
 export function useBizView(real: BusinessProfile): BusinessProfile {
-  const s = getForcedState()
-  if (s === 'draft') return { ...sampleBase, menu: [], status: { basics: 'done', location: 'done' }, live: false }
-  if (s === 'verified') return { ...sampleBase, live: true, verification: { method: 'upload', files: ['dti.pdf', 'permit.jpg'], status: 'verified' }, status: { ...sampleBase.status, menu: 'done', verify: 'done' } }
-  if (s === 'live') return { ...sampleBase, live: true }
-  if (s === 'sample' || (isEmbed() && !real.name)) return sampleBase
   return real
 }
 

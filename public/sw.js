@@ -1,71 +1,49 @@
-/* Bitinary service worker: offline app shell + cached imagery. */
-const SHELL = 'bitinary-shell-v1'
-const IMAGES = 'bitinary-img-v1'
-const scope = self.registration.scope
+const SHELL_CACHE = 'bitinary-shell-v2'
+const ASSET_CACHE = 'bitinary-assets-v2'
+const MANAGED_CACHES = [SHELL_CACHE, ASSET_CACHE]
+const HASHED_ASSET = /\/assets\/.+-[\w-]{8,}\.(?:js|css|woff2?|png|jpe?g|svg|webp)$/
 
-self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches
-      .open(SHELL)
-      .then((c) => c.addAll([scope, `${scope}manifest.webmanifest`, `${scope}icons/icon-192.png`]))
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(SHELL_CACHE)
+      .then((cache) => cache.add(new URL('./', self.registration.scope).href))
       .then(() => self.skipWaiting()),
   )
 })
 
-self.addEventListener('activate', (e) => {
-  e.waitUntil(
-    caches
-      .keys()
-      .then((keys) => Promise.all(keys.filter((k) => ![SHELL, IMAGES].includes(k)).map((k) => caches.delete(k))))
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys
+        .filter((key) => key.startsWith('bitinary-') && !MANAGED_CACHES.includes(key))
+        .map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   )
 })
 
-self.addEventListener('fetch', (e) => {
-  const req = e.request
-  if (req.method !== 'GET') return
-  const url = new URL(req.url)
+self.addEventListener('fetch', (event) => {
+  const request = event.request
+  const url = new URL(request.url)
+  if (request.method !== 'GET' || url.origin !== self.location.origin) return
 
-  // SPA navigations: network first, fall back to cached shell
-  if (req.mode === 'navigate') {
-    e.respondWith(
-      fetch(req)
-        .then((res) => {
-          caches.open(SHELL).then((c) => c.put(scope, res.clone()))
-          return res
-        })
-        .catch(() => caches.match(scope)),
-    )
-    return
-  }
-
-  // photos: cache first
-  if (url.hostname === 'images.unsplash.com') {
-    e.respondWith(
-      caches.open(IMAGES).then(async (c) => {
-        const hit = await c.match(req)
-        if (hit) return hit
-        const res = await fetch(req)
-        if (res.ok || res.type === 'opaque') c.put(req, res.clone())
-        return res
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request).catch(async () => {
+        const shell = await caches.match(new URL('./', self.registration.scope).href)
+        return shell ?? new Response('This page is unavailable offline.', { status: 503 })
       }),
     )
     return
   }
 
-  // same-origin assets: stale while revalidate
-  if (url.origin === self.location.origin) {
-    e.respondWith(
-      caches.open(SHELL).then(async (c) => {
-        const hit = await c.match(req)
-        const net = fetch(req)
-          .then((res) => {
-            if (res.ok) c.put(req, res.clone())
-            return res
-          })
-          .catch(() => hit)
-        return hit || net
-      }),
-    )
-  }
+  if (!HASHED_ASSET.test(url.pathname)) return
+  event.respondWith(
+    caches.open(ASSET_CACHE).then(async (cache) => {
+      const cached = await cache.match(request)
+      if (cached) return cached
+      const response = await fetch(request)
+      if (response.ok) await cache.put(request, response.clone())
+      return response
+    }),
+  )
 })

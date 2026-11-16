@@ -58,13 +58,14 @@ export function useCamera() {
   }, [torch, torchSupported])
 
   /** Square crop of the current frame as a compressed JPEG data URL. */
-  const capture = useCallback((): string | null => {
+  const capture = useCallback((filter = 'none'): string | null => {
     const v = videoRef.current
     if (!v || !v.videoWidth) return null
     const side = Math.min(v.videoWidth, v.videoHeight)
     const c = document.createElement('canvas')
     c.width = c.height = 640
     const ctx = c.getContext('2d')!
+    ctx.filter = filter
     if (facing === 'user') {
       ctx.translate(640, 0)
       ctx.scale(-1, 1)

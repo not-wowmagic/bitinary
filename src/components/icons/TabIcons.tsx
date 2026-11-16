@@ -60,21 +60,9 @@ export function PolaroidIcon({ active, size = 24, className }: P) {
 }
 
 /**
- * Jimbot tab icon: one-color head silhouette, salakot hat + ears only.
- * Outline when inactive, solid fill when active (the tab capsule supplies the orange).
+ * Jimbot tab icon: the full fox mascot artwork without a circular crop.
  */
 export function FoxIcon({ active, size = 24, className }: P) {
-  return (
-    <svg {...base(size)} className={className}>
-      {/* ears behind the hat */}
-      <path d="M5.4 12.4 4.2 4.3l5 3.4" fill={active ? 'currentColor' : 'none'} />
-      <path d="m18.6 12.4 1.2-8.1-5 3.4" fill={active ? 'currentColor' : 'none'} />
-      {/* conical salakot with brim */}
-      <path d="M12 3.4 2.6 14.6c0 .9 4.2 2 9.4 2s9.4-1.1 9.4-2z" fill={active ? 'currentColor' : 'none'} />
-      {/* weave lines */}
-      <path d="M12 3.4v13.2M7.6 9.2c2.9.9 5.9.9 8.8 0" stroke={active ? 'var(--c-primary)' : 'currentColor'} strokeWidth={active ? 1.5 : 1.25} />
-      {/* chin strap hint */}
-      <path d="M7.4 16.4c.9 2.4 2.6 4.1 4.6 4.1s3.7-1.7 4.6-4.1" />
-    </svg>
-  )
+  return <img src={hello} alt="" width={size} height={size} aria-hidden="true" className={className} style={{ width: size, height: size, objectFit: 'contain' }} />
 }
+import hello from '@/assets/jimbot/hello.png'

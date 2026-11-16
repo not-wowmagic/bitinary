@@ -34,7 +34,7 @@ function detect(text: string): Intent {
 
 function answer(intent: Intent, L: Lang, d: BizData, enough: boolean): Omit<Msg, 'id' | 'from'> {
   const t = (tl: string, en: string) => (L === 'en' ? en : tl)
-  const best = bestSlot()
+  const best = bestSlot(stats.heat)
   const day = WEEKDAYS[L][(best.d + 1) % 7]
   if (!enough && intent !== 'support')
     return { text: t('Kulang pa ang data. Subukan ulit pagkalipas ng 2 linggo.', "I don't have enough data yet. Check again in 2 weeks."), data: [[t('Araw na live', 'Days live'), '0'], [t('Views', 'Views'), '0']] }

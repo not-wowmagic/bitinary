@@ -1,4 +1,4 @@
-import { Navigate, createBrowserRouter } from 'react-router'
+import { Link, Navigate, createBrowserRouter, useLocation, useRouteError } from 'react-router'
 import { AppShell } from '@/components/layout/AppShell'
 import { AccountHome, BillingPage, HelpPage, PreferencesPage, ProfilePage, TeamPage } from '@/biz/pages/Account'
 import { Analytics } from '@/biz/pages/Analytics'
@@ -7,7 +7,7 @@ import { Comments } from '@/biz/pages/Comments'
 import { Composer } from '@/biz/pages/Composer'
 import { BoostPage, DealsPage, QrKit, ReservationsPage } from '@/biz/pages/Growth'
 import { JimbotChat } from '@/biz/pages/JimbotChat'
-import { BizContact, BizLanguage, BizLive, BizMethod, BizName, BizReady, BizSetupHub, BizSummary, BizVerify, BizWelcome } from '@/biz/pages/Onboarding'
+import { BizAuthCallback, BizContact, BizLanguage, BizLive, BizMethod, BizName, BizPasswordRecovery, BizReady, BizSetupHub, BizSummary, BizVerify, BizWelcome } from '@/biz/pages/Onboarding'
 import { Overview } from '@/biz/pages/Overview'
 import { Posts } from '@/biz/pages/Posts'
 import { CaseDetail, Cases, ReviewDetail, Reviews } from '@/biz/pages/Reviews'
@@ -32,7 +32,7 @@ import { SearchScreen } from '@/screens/Search'
 import { ShopDetailScreen } from '@/screens/ShopDetail'
 import { BusinessesScreen } from '@/screens/Businesses'
 import { LanguagePick, Splash, Welcome } from '@/screens/signup/Entry'
-import { ContactStep, MethodStep, NameStep, ReadyStep, RoleStep, VerifyStep } from '@/screens/signup/Signup'
+import { ContactStep, EmailAuthCallback, MethodStep, NameStep, PasswordRecoveryStep, ReadyStep, RoleStep, VerifyStep } from '@/screens/signup/Signup'
 import { ConsoleRoot, RequireDevAccount } from '@/dev/console/Shell'
 import { Overview as DevOverview } from '@/dev/console/Overview'
 import { UsersPage, UserDetail } from '@/dev/console/Users'
@@ -42,13 +42,45 @@ import { BannersPage, BannerEditor } from '@/dev/console/Banners'
 import { ThemePage } from '@/dev/console/Theme'
 import { TeamPage as DevTeamPage } from '@/dev/console/Team'
 
-const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || undefined
+const basename = new URL(import.meta.env.BASE_URL, window.location.origin).pathname.replace(/\/$/, '') || undefined
+
+function RouteErrorFallback() {
+  const error = useRouteError()
+  const { pathname } = useLocation()
+  const businessRoute = pathname.startsWith('/biz')
+  const detail = error instanceof Error ? error.message : 'An unexpected application error occurred.'
+
+  return (
+    <main className="grid min-h-dvh place-items-center bg-background px-5 py-10 text-fg">
+      <section role="alert" className="w-full max-w-lg rounded-[28px] bg-surface p-7 shadow-card sm:p-9">
+        <p className="font-display text-sm font-semibold uppercase tracking-wide text-primary">Bitinary</p>
+        <h1 className="mt-2 text-h2">Hindi maipakita ang page</h1>
+        <p className="mt-2 text-body text-fg-2">
+          Nagkaroon ng hindi inaasahang problema. Maaari mong subukang i-reload ang page o bumalik sa simula.
+        </p>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button type="button" onClick={() => window.location.reload()} className="min-h-12 rounded-full bg-primary px-5 font-display font-semibold text-ink">
+            I-reload ang page
+          </button>
+          <Link to={businessRoute ? '/biz/language' : '/'} className="inline-flex min-h-12 items-center rounded-full border border-line px-5 font-display font-semibold">
+            Bumalik sa simula
+          </Link>
+        </div>
+        <details className="mt-6 text-sm text-fg-2">
+          <summary className="cursor-pointer font-semibold">Mga teknikal na detalye</summary>
+          <pre className="mt-2 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-background p-3 font-mono text-xs">{detail}</pre>
+        </details>
+      </section>
+    </main>
+  )
+}
 
 export const router = createBrowserRouter(
   [
     {
       path: '/bitinarydev',
       Component: ConsoleRoot,
+      errorElement: <RouteErrorFallback />,
       children: [
         {
           Component: RequireDevAccount,
@@ -77,12 +109,15 @@ export const router = createBrowserRouter(
       // Bitinary Business: a separate, business-only app with its own sign-in, shell and data.
       path: '/biz',
       Component: BizRoot,
+      errorElement: <RouteErrorFallback />,
       children: [
         { index: true, element: <Navigate to="/biz/stats" replace /> },
         { path: 'screens', Component: BizScreenIndex },
         { path: 'language', Component: BizLanguage },
         { path: 'welcome', Component: BizWelcome },
         { path: 'auth', Component: BizMethod },
+        { path: 'auth/callback', Component: BizAuthCallback },
+        { path: 'auth/recovery', Component: BizPasswordRecovery },
         { path: 'auth/verify', Component: BizVerify },
         { path: 'auth/email', Component: BizContact },
         { path: 'signup/name', Component: BizName },
@@ -128,6 +163,7 @@ export const router = createBrowserRouter(
     {
       path: '/',
       Component: Root,
+      errorElement: <RouteErrorFallback />,
       children: [
         { path: 'splash', Component: Splash },
         { path: 'language', Component: LanguagePick },
@@ -136,6 +172,8 @@ export const router = createBrowserRouter(
         { path: 'role', element: <Navigate to="/signup/role" replace /> },
         { path: 'signup/role', Component: RoleStep },
         { path: 'auth', Component: MethodStep },
+        { path: 'auth/callback', Component: EmailAuthCallback },
+        { path: 'auth/recovery', Component: PasswordRecoveryStep },
         { path: 'auth/email', Component: ContactStep },
         { path: 'auth/verify', Component: VerifyStep },
         { path: 'signup/name', Component: NameStep },

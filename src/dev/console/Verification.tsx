@@ -1,13 +1,11 @@
 import { ArrowLeft, BadgeCheck, CalendarCheck, Check, Download, FileText, RotateCcw, Search, ShieldCheck, X, ZoomIn } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
-import { useBizSnapshot } from '@/app/bizBridge'
 import { useConsole, useCurrentDev } from '@/app/console'
 import { useStore } from '@/app/store'
 import { useSaveVerification, useVerifications, type VerificationRow } from '@/app/verification'
 import { Button } from '@/components/ui/Button'
 import { Sheet } from '@/components/ui/Sheet'
-import { LINKED_PLACE_ID, placeById } from '@/data/places'
 import { cn } from '@/lib/cn'
 import { img } from '@/lib/format'
 import { daysUntil, verifyState, type DocKey, type Verification, type VerifyDoc, type VerifyState } from '@/lib/verify'
@@ -32,21 +30,9 @@ export function StateBadge({ v }: { v: Verification }) {
   return <Badge tone={m.tone}>{s === 'expiring' ? `Expiring · ${daysUntil(v.permitValidUntil)}d` : m.label}</Badge>
 }
 
-const OWNERS = ['Nena Bautista', 'Ella Dizon', 'Antonio Garcia', 'Ramon Cruz', 'Liza Fernandez', 'Carmen Lopez', 'Dado Reyes', 'Tess Manalo', 'Ruben Sy', 'Gina Ong', 'Lito Rivera']
 /** Owner, city and display data for a verification row. */
 function useRowInfo() {
-  const biz = useBizSnapshot()
-  return (r: VerificationRow, i = 0) => {
-    const p = placeById(r.placeId)!
-    const linked = r.placeId === LINKED_PLACE_ID
-    return {
-      place: p,
-      owner: linked ? (biz.session ? biz.profile.name || biz.session.contact : 'No account on this device') : OWNERS[i % OWNERS.length],
-      contact: linked ? biz.profile.email || (biz.profile.mobile && `+63 ${biz.profile.mobile}`) || '—' : `${OWNERS[i % OWNERS.length].split(' ')[0].toLowerCase()}@${p.logo.initials.toLowerCase()}.ph`,
-      city: linked ? biz.business.city || 'Maynila' : p.area === 'Batangas' ? 'Batangas City' : 'Maynila',
-      name: linked ? biz.business.name || p.name : p.name,
-    }
-  }
+  return (row: VerificationRow) => row
 }
 
 type DateField = 'submittedAt' | 'reviewedAt' | 'permitValidUntil' | 'dtiRegistered'
@@ -60,7 +46,7 @@ const day = (x?: string) => x?.slice(0, 10) ?? ''
 const ORDER: VerifyState[] = ['pending', 'needs-docs', 'expired', 'expiring', 'rejected', 'none', 'verified']
 
 export function VerificationPage() {
-  const rows = useVerifications()
+  const { rows, loading } = useVerifications()
   const info = useRowInfo()
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
@@ -72,7 +58,7 @@ export function VerificationPage() {
   const [to, setTo] = useState('')
   const [sort, setSort] = useState<{ key: DateField | 'default'; dir: 1 | -1 }>({ key: 'default', dir: 1 })
 
-  const all = useMemo(() => rows.map((r, i) => ({ ...r, ...info(r, i), state: verifyState(r.v) })), [rows, info])
+  const all = useMemo(() => rows.map((r) => ({ ...r, ...info(r), state: verifyState(r.v) })), [rows, info])
   const counts = Object.fromEntries(STATES.map((s) => [s.id, all.filter((r) => r.state === s.id).length]))
   const cities = [...new Set(all.map((r) => r.city))]
   const setStatuses = (list: VerifyState[]) => {
@@ -172,7 +158,7 @@ export function VerificationPage() {
           </p>
         )}
         {list.length === 0 ? (
-          <Empty title="No businesses match" body="Try other filters or clear the dates." />
+          <Empty title={loading ? 'Loading verification requests…' : all.length ? 'No matching businesses' : 'No verification requests yet'} body={loading ? undefined : all.length ? 'Try changing your filters or date range.' : 'Businesses with verification requests will appear here.'} />
         ) : (
           <>
             <div className="hidden overflow-x-auto xl:block">
@@ -194,7 +180,7 @@ export function VerificationPage() {
                     <tr key={r.placeId} onClick={() => navigate(r.placeId)} className="cursor-pointer border-b border-line last:border-0 hover:bg-sunken/60 dark:hover:bg-elevated/60">
                       <td className="py-3 pl-5 pr-3">
                         <span className="flex items-center gap-3">
-                          <img src={img(r.place.image, 96, 96)} alt="" className="h-10 w-10 shrink-0 rounded-[10px] object-cover" loading="lazy" />
+                          <img src={img(r.image ?? '', 96, 96)} alt="" className="h-10 w-10 shrink-0 rounded-[10px] object-cover" loading="lazy" />
                           <span className="min-w-0">
                             <span className="block truncate font-semibold">{r.name}</span>
                             <span className="block truncate text-[12px] text-fg-2">
@@ -221,7 +207,7 @@ export function VerificationPage() {
               {list.map((r) => (
                 <li key={r.placeId}>
                   <Link to={r.placeId} className="flex items-center gap-3 px-4 py-3">
-                    <img src={img(r.place.image, 96, 96)} alt="" className="h-12 w-12 shrink-0 rounded-[12px] object-cover" loading="lazy" />
+                    <img src={img(r.image ?? '', 96, 96)} alt="" className="h-12 w-12 shrink-0 rounded-[12px] object-cover" loading="lazy" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-display text-[15px] font-semibold">{r.name}</span>
                       <span className="block truncate text-[13px] text-fg-2">
@@ -263,7 +249,7 @@ function DocCard({ title, doc, onZoom }: { title: string; doc?: VerifyDoc; onZoo
         <div className="flex h-36 flex-col items-center justify-center gap-1.5 rounded-[14px] bg-sunken text-center dark:bg-elevated">
           <FileText size={28} className="text-link" />
           <span className="font-display text-[13px] font-semibold">{doc.type.includes('pdf') ? 'PDF' : 'File'}</span>
-          <span className="text-[12px] text-fg-2">{doc.size ? 'Preview not stored (PDF)' : 'Sample document'}</span>
+          <span className="text-[12px] text-fg-2">Preview unavailable</span>
         </div>
       )}
       {doc && (
@@ -278,7 +264,7 @@ function DocCard({ title, doc, onZoom }: { title: string; doc?: VerifyDoc; onZoo
 
 export function VerificationDetail() {
   const { placeId = '' } = useParams()
-  const rows = useVerifications()
+  const { rows, loading } = useVerifications()
   const info = useRowInfo()
   const save = useSaveVerification()
   const { update } = useConsole()
@@ -293,11 +279,11 @@ export function VerificationDetail() {
   const [reason, setReason] = useState(REJECT[0])
   const [missing, setMissing] = useState<DocKey[]>(['permit'])
   const [manual, setManual] = useState<Record<string, boolean>>({})
+  if (loading) return <Panel><Empty title="Loading verification request…" /></Panel>
   if (!row) return <Panel><Empty title="Business not found" action={<Button onClick={() => navigate(BASE)}>Back to verification</Button>} /></Panel>
   const v = row.v
-  const meta = info(row, idx)
+  const meta = info(row)
   const state = verifyState(v)
-  const linked = row.placeId === LINKED_PLACE_ID
 
   const auto = [
     { label: 'DTI no. has 7 digits', ok: /^\d{7}$/.test(v.dtiNo ?? '') },
@@ -308,7 +294,7 @@ export function VerificationDetail() {
   ]
   const manualItems = ['Name on the documents matches the business name', 'Address matches the listing', 'Documents look original (not edited)']
 
-  const decide = () => {
+  const decide = async () => {
     if (!decision) return
     if ((decision === 'docs' || decision === 'reject') && !note.trim()) return
     const at = new Date().toISOString()
@@ -332,9 +318,10 @@ export function VerificationDetail() {
           : decision === 'reject'
             ? { tl: `Hindi naaprubahan ang verification: ${reason}.`, en: `Verification not approved: ${reason}.` }
             : { tl: 'Na-reset ang verification mo. Puwede kang magpadala ulit.', en: 'Your verification was reset. You can submit again.' }
-    if (!save(row.placeId, next, linked ? notif : undefined)) return showToast({ text: 'Could not save. Storage may be full.', expression: 'unsure' })
+    const result = await save(row.placeId, next, notif)
+    if (result.error) return showToast({ text: `Couldn’t save the verification decision. Details: ${result.error}`, expression: 'unsure' })
     update((x) => x, { area: 'Verification', action: `${decision === 'approve' ? 'Approved' : decision === 'docs' ? 'Requested documents from' : decision === 'reject' ? 'Rejected' : 'Reset'} ${meta.name}`, target: row.placeId })
-    showToast({ text: decision === 'approve' ? `${meta.name} is verified` : decision === 'docs' ? 'Owner asked for documents' : decision === 'reject' ? 'Verification rejected' : 'Verification reset', expression: decision === 'approve' ? 'celebrating' : 'pointing' })
+    showToast({ text: decision === 'approve' ? `${meta.name} is verified.` : decision === 'docs' ? 'Document request sent to the owner.' : decision === 'reject' ? 'Verification rejected.' : 'Verification reset.', expression: decision === 'approve' ? 'celebrating' : 'pointing' })
     setDecision(null)
     setNote('')
   }
@@ -345,7 +332,7 @@ export function VerificationDetail() {
         <ArrowLeft size={17} /> All businesses
       </Link>
       <div className="card flex flex-wrap items-center gap-4 p-5">
-        <img src={img(meta.place.image, 160, 160)} alt="" className="h-16 w-16 rounded-[16px] object-cover" />
+        <img src={img(meta.image ?? '', 160, 160)} alt="" className="h-16 w-16 rounded-[16px] object-cover" />
         <div className="min-w-0 flex-1">
           <h1 className="text-h2">{meta.name}</h1>
           <p className="text-[14px] text-fg-2">
@@ -353,7 +340,7 @@ export function VerificationDetail() {
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             <StateBadge v={v} />
-            {linked ? <Badge tone="dark">Bitinary Business account</Badge> : <Badge>Sample record</Badge>}
+            <Badge tone="dark">Database business</Badge>
             {v.method && <Badge>{v.method === 'upload' ? 'Uploaded documents' : 'On-site check'}</Badge>}
           </div>
         </div>
@@ -459,7 +446,7 @@ export function VerificationDetail() {
                 ))}
               </ol>
             ) : (
-              <Empty title="Nothing submitted yet" />
+              <Empty title="No documents submitted yet" />
             )}
           </Panel>
         </div>
@@ -501,7 +488,7 @@ export function VerificationDetail() {
             </div>
           )}
           {decision !== 'reset' && (
-            <Field label={decision === 'approve' ? 'Note to owner (optional)' : 'Message to owner'} htmlFor="v-note" hint={linked ? 'The owner sees this in Bitinary Business.' : 'Saved with the record.'}>
+            <Field label={decision === 'approve' ? 'Note to owner (optional)' : 'Message to owner'} htmlFor="v-note" hint="Saved with the record and sent to the business owner.">
               <textarea id="v-note" value={note} onChange={(e) => setNote(e.target.value.slice(0, 300))} rows={3} placeholder={decision === 'docs' ? 'Malabo ang kopya ng permit. Mag-upload ng mas malinaw na litrato.' : ''} className={cn(field, 'h-auto resize-none py-2.5')} />
             </Field>
           )}

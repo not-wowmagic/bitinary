@@ -86,7 +86,7 @@ export function ThemePage() {
   const dirty = JSON.stringify(draft) !== JSON.stringify(c.theme)
   const apply = () => {
     update((x) => ({ ...x, theme: draft, themeDraft: undefined }), { area: 'Theme', action: `Applied theme "${PRESETS.find((p) => p.preset === draft.preset)?.name ?? c.savedPresets.find((p) => p.preset === draft.preset)?.name ?? 'Custom'}"` })
-    showToast({ text: 'Theme applied to the whole app', expression: 'celebrating' })
+    showToast({ text: 'Theme applied to the app.', expression: 'celebrating' })
   }
   const all = [...PRESETS, ...c.savedPresets]
   const pal = mode === 'light' ? draft.light : draft.dark
@@ -108,7 +108,7 @@ export function ThemePage() {
           </>
         }
       />
-      {dirty && <p className="-mt-2 mb-4 inline-flex rounded-full bg-caution-bg px-3 py-1 text-[13px] font-semibold text-caution">Unsaved changes. Only the preview shows them until you apply.</p>}
+      {dirty && <p className="-mt-2 mb-4 inline-flex rounded-full bg-caution-bg px-3 py-1 text-[13px] font-semibold text-caution">You have unapplied changes. They’ll appear in the app after you select “Apply to app.”</p>}
       <div className="grid gap-4 xl:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] xl:items-start">
         <div className="space-y-4">
           <Panel title="Presets">

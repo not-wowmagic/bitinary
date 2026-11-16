@@ -2,7 +2,7 @@ import {
   ArrowRight, BadgeCheck, CalendarCheck, ChartColumn, ChevronRight, Eye, Heart, Headphones, LifeBuoy, Lock, MessageCircle, Phone, Plus, Rocket, ScanLine, Sparkles, Tag, TriangleAlert,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { Facebook } from '@/components/icons/Brand'
 import { DAYS, useAccount, type BizThemeId } from '@/app/account'
@@ -16,7 +16,7 @@ import { SuccessScreen } from '@/components/onboarding/Templates'
 import { Button } from '@/components/ui/Button'
 import { Sheet } from '@/components/ui/Sheet'
 import { Toggle } from '@/components/ui/Toggle'
-import { REQUIRED_BIZ, bizThemes, menuCategories } from '@/data/themes'
+import { REQUIRED_BIZ, bizThemes, getBizThemesForType, getOfferingConfig, menuCategories } from '@/data/themes'
 import { cn } from '@/lib/cn'
 import { useBreakpoint } from '@/lib/useMedia'
 import { BizThemeForm } from './BizThemes'
@@ -65,6 +65,7 @@ export function BusinessHub() {
   const [help, setHelp] = useState(false)
   const req = requiredDone(b)
   const ready = req === REQUIRED_BIZ.length
+  const dynamicThemes = useMemo(() => getBizThemesForType(b.type), [b.type])
   const open = (tid: BizThemeId) => navigate(`/business/setup/${tid}`)
   const onDone = () => navigate('/business/setup', { replace: true })
 
@@ -105,7 +106,7 @@ export function BusinessHub() {
         <span className="ml-auto font-display text-[14px] font-semibold text-fg-2">{req}/4</span>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-1 xl:gap-2.5">
-        {bizThemes
+        {dynamicThemes
           .filter((x) => x.required)
           .map((x) => (
             <ThemeCard key={x.id} layout={desktop ? 'row' : 'tile'} icon={x.icon} title={x[lang]} minutes={x.minutes} status={b.status[x.id]} active={id === x.id || (!id && !desktop && x.id === nextReq)} onClick={() => open(x.id)} />
@@ -118,7 +119,7 @@ export function BusinessHub() {
         <span className="ml-auto text-[13px] text-fg-2">{t('Puwedeng tapusin mamaya', 'Finish anytime later')}</span>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-1 xl:gap-2.5">
-        {bizThemes
+        {dynamicThemes
           .filter((x) => !x.required)
           .map((x) => (
             <ThemeCard key={x.id} layout={desktop ? 'row' : 'tile'} icon={x.icon} title={x[lang]} minutes={x.minutes} status={b.status[x.id]} active={id === x.id} onClick={() => open(x.id)} />
@@ -306,12 +307,13 @@ export function BusinessDashboard() {
   const score = healthScore(b)
   const today = DAYS[(new Date().getDay() + 6) % 7]
   const closedToday = b.hours[today].closed
+  const offering = getOfferingConfig(b.type)
 
   const addQuick = () => {
     if (!quick.name.trim()) return
-    setBusiness((x) => ({ ...x, menu: [...x.menu, { id: `q${Date.now()}`, name: quick.name.trim(), price: quick.price, category: menuCategories[0] }], status: { ...x.status, menu: 'done' } }))
+    setBusiness((x) => ({ ...x, menu: [...x.menu, { id: `q${Date.now()}`, name: quick.name.trim(), price: quick.price, category: offering.categories[0] }], status: { ...x.status, menu: 'done' } }))
     setQuick({ name: '', price: '' })
-    showToast({ text: t('Naidagdag sa menu!', 'Added to the menu!'), expression: 'celebrating' })
+    showToast({ text: t('Naidagdag!', 'Added successfully!'), expression: 'celebrating' })
   }
 
   return (
@@ -373,15 +375,15 @@ export function BusinessDashboard() {
               </span>
               <Toggle label={t('Bukas ngayon', 'Open today')} checked={!closedToday} onChange={(v) => setBusiness((x) => ({ ...x, hours: { ...x.hours, [today]: { ...x.hours[today], closed: !v } } }))} />
             </div>
-            <p className="mb-2 mt-4 font-display text-[14px] font-medium">{t('Magdagdag ng menu item', 'Add a menu item')}</p>
+            <p className="mb-2 mt-4 font-display text-[14px] font-medium">{offering.quickUpdateTitle[lang]}</p>
             <div className="flex gap-2">
-              <input value={quick.name} onChange={(e) => setQuick((q) => ({ ...q, name: e.target.value }))} placeholder={t('Item', 'Item')} aria-label={t('Item', 'Item')} className="h-11 min-w-0 flex-1 rounded-[12px] border border-line bg-bg px-3 text-[15px] outline-none focus:border-primary" />
-              <input value={quick.price} inputMode="decimal" onChange={(e) => setQuick((q) => ({ ...q, price: e.target.value.replace(/[^\d.]/g, '') }))} placeholder="₱" aria-label={t('Presyo', 'Price')} className="h-11 w-20 rounded-[12px] border border-line bg-bg px-3 text-[15px] outline-none focus:border-primary" />
+              <input value={quick.name} onChange={(e) => setQuick((q) => ({ ...q, name: e.target.value }))} placeholder={offering.itemPlaceholder[lang].split(',')[0]} aria-label={offering.itemPlaceholder[lang].split(',')[0]} className="h-11 min-w-0 flex-1 rounded-[12px] border border-line bg-bg px-3 text-[15px] outline-none focus:border-primary" />
+              <input value={quick.price} inputMode="decimal" onChange={(e) => setQuick((q) => ({ ...q, price: e.target.value.replace(/[^\d.]/g, '') }))} placeholder="₱" aria-label={offering.priceLabel[lang]} className="h-11 w-20 rounded-[12px] border border-line bg-bg px-3 text-[15px] outline-none focus:border-primary" />
               <Button aria-label={t('Idagdag', 'Add')} onClick={addQuick} disabled={!quick.name.trim()} className="!px-3">
                 <Plus size={20} />
               </Button>
             </div>
-            <p className="mt-2 text-[13px] text-fg-2">{t(`${b.menu.length} item sa menu`, `${b.menu.length} menu items`)}</p>
+            <p className="mt-2 text-[13px] text-fg-2">{offering.quickUpdateCountLabel(b.menu.length, lang)}</p>
           </Card>
 
           <Card title={t('Profile Health Score', 'Profile Health Score')} icon={<Heart size={20} />}>

@@ -1,8 +1,8 @@
 import { Download, Share, SquarePlus, WifiOff, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
-import appIcon from '@/assets/jimbot/app-icon.png'
 import { useStore } from '@/app/store'
+import { useLang } from '@/app/i18n'
 import { isForced } from '@/lib/forced'
 import { useInstallPrompt } from '@/lib/useInstallPrompt'
 import { useOnline } from '@/lib/useOnline'
@@ -10,6 +10,7 @@ import { Button } from '../ui/Button'
 import { Sheet } from '../ui/Sheet'
 
 export function InstallBanner() {
+  const { t } = useLang()
   const { installDismissed, setInstallDismissed } = useStore()
   const { canPrompt, isStandalone, isIOS, install } = useInstallPrompt()
   const [howTo, setHowTo] = useState(false)
@@ -25,10 +26,10 @@ export function InstallBanner() {
             exit={{ opacity: 0, height: 0, marginTop: 0 }}
             className="card mx-4 flex items-center gap-3 p-3 md:mx-0"
           >
-            <img src={appIcon} alt="" className="h-12 w-12 shrink-0 rounded-[14px]" />
+            <img src={`${import.meta.env.BASE_URL}icons/icon-192.png`} alt="" className="h-12 w-12 shrink-0 rounded-[14px]" />
             <div className="min-w-0 flex-1">
-              <p className="font-display text-[15px] font-semibold leading-tight">I-install ang Bitinary</p>
-              <p className="text-[13px] leading-snug text-fg-2">Mabilis buksan, kahit offline.</p>
+              <p className="font-display text-[15px] font-semibold leading-tight">{t('I-install ang Bitinary', 'Install Bitinary')}</p>
+              <p className="text-[13px] leading-snug text-fg-2">{t('Mabilis buksan, kahit offline.', 'Open it quickly, even offline.')}</p>
             </div>
             <Button
               size="sm"
@@ -39,9 +40,9 @@ export function InstallBanner() {
                 } else setHowTo(true)
               }}
             >
-              I-install
+              {t('I-install', 'Install')}
             </Button>
-            <button aria-label="Isara" onClick={() => setInstallDismissed(true)} className="-mr-1 flex h-11 w-9 items-center justify-center text-muted">
+            <button aria-label={t('Isara', 'Close')} onClick={() => setInstallDismissed(true)} className="-mr-1 flex h-11 w-9 items-center justify-center text-muted">
               <X size={18} />
             </button>
           </motion.div>
@@ -83,11 +84,12 @@ export function InstallBanner() {
 
 export function OfflineBanner() {
   const online = useOnline()
+  const { t } = useLang()
   if (online) return null
   return (
     <div role="status" className="mx-4 flex items-center gap-2.5 rounded-2xl bg-caution-bg px-3.5 py-2.5 text-caution md:mx-0">
       <WifiOff size={18} strokeWidth={2} />
-      <p className="text-[14px] font-semibold leading-snug">Offline ka. Naka-save na itinerary at listahan lang ang makikita.</p>
+      <p className="text-[14px] font-semibold leading-snug">{t('Offline ka. Naka-save na mga biyahe at talaan lamang ang makikita.', 'You are offline. Only saved trips and lists are available.')}</p>
     </div>
   )
 }

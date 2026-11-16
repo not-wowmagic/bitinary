@@ -8,7 +8,7 @@ import { Jimbot } from '@/components/mascot/Jimbot'
 import { Button } from '@/components/ui/Button'
 import { PhaseTag } from '@/components/ui/PhaseTag'
 import { Toggle } from '@/components/ui/Toggle'
-import { sampleMoments, type MomentFrame } from '@/data/moments'
+import type { MomentFrame } from '@/data/moments'
 import { cn } from '@/lib/cn'
 
 const frames = Object.keys(frameStyles) as MomentFrame[]
@@ -16,12 +16,12 @@ const frames = Object.keys(frameStyles) as MomentFrame[]
 export function CreateMoment() {
   const { myMoments, addMoment } = useStore()
   const navigate = useNavigate()
-  const pool = [...myMoments, ...sampleMoments.filter((m) => m.mine)]
+  const pool = myMoments
   const [picked, setPicked] = useState<string[]>(pool.slice(0, 2).map((m) => m.id))
   const [frame, setFrame] = useState<MomentFrame>('classic')
-  const [caption, setCaption] = useState('Unang araw sa Intramuros')
+  const [caption, setCaption] = useState('Unang Moment ko')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
-  const [place, setPlace] = useState('Intramuros')
+  const [place, setPlace] = useState('')
   const [tilt, setTilt] = useState(3)
   const [shareOn, setShareOn] = useState(false)
   const [done, setDone] = useState(false)

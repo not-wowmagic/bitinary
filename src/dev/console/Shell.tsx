@@ -3,14 +3,17 @@ import { motion } from 'motion/react'
 import { useEffect, useState } from 'react'
 import { Link, Outlet, ScrollRestoration, useLocation, useNavigate } from 'react-router'
 import { IDLE_MS, currentDev, useConsole, useCurrentDev } from '@/app/console'
-import { SetPassword, SignIn } from './Auth'
+import { isConsoleAdmin, SignIn } from './Auth'
 import { Avatar } from './ui'
 import { useTheme } from '@/app/theme'
 import { Toast } from '@/components/layout/Toast'
 import { Jimbot } from '@/components/mascot/Jimbot'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { Sheet } from '@/components/ui/Sheet'
 import { cn } from '@/lib/cn'
-import { SYNC_EVENT } from '@/lib/usePersistentState'
+import { clearBitinaryBrowserCache } from '@/lib/clearBitinaryBrowserCache'
+import { supabase } from '@/lib/supabase'
+import { useStore } from '@/app/store'
 
 const BASE = '/bitinarydev'
 
@@ -49,6 +52,7 @@ const isActive = (pathname: string, to: string, exact?: boolean) => (exact ? pat
 
 /** Console frame: toast and scroll restoration. Not wrapped by maintenance mode or announcements. */
 export function ConsoleRoot() {
+  const { dataError } = useConsole()
   useEffect(() => {
     const prev = document.title
     document.title = 'Bitinary Dev Console'
@@ -59,6 +63,11 @@ export function ConsoleRoot() {
   return (
     <>
       <Outlet />
+      {dataError && (
+        <div role="alert" className="fixed inset-x-3 bottom-3 z-[100] mx-auto max-w-xl rounded-2xl bg-danger px-4 py-3 text-sm font-semibold text-white shadow-lg">
+          Console changes couldn’t be synced. Details: {dataError}
+        </div>
+      )}
       <Toast />
       <ScrollRestoration />
     </>
@@ -67,15 +76,78 @@ export function ConsoleRoot() {
 
 /** Developer sign-in (no shared PIN). Sessions end after 30 minutes without activity. */
 export function RequireDevAccount() {
-  const { c, update } = useConsole()
+  const { c, update, ready: consoleReady, dataError } = useConsole()
   const { pathname } = useLocation()
-  const [, tick] = useState(0)
+  const [authReady, setAuthReady] = useState(false)
+  const [authAuthorized, setAuthAuthorized] = useState(false)
+  const [authError, setAuthError] = useState<string>()
   const dev = currentDev(c)
-  // Re-check the idle timer every 30 s, and count navigation and clicks as activity.
   useEffect(() => {
-    const t = setInterval(() => tick((n) => n + 1), 30_000)
-    return () => clearInterval(t)
-  }, [])
+    let active = true
+    let revision = 0
+    const verify = async (session: Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session']) => {
+      const currentRevision = ++revision
+      if (!session) {
+        if (!active || currentRevision !== revision) return
+        setAuthAuthorized(false)
+        setAuthError(undefined)
+        update((x) => ({ ...x, devSession: null }))
+        setAuthReady(true)
+        return
+      }
+      try {
+        if (!session.user.email || !session.user.email_confirmed_at) throw new Error('Please confirm your email address, then sign in again.')
+        if (!(await isConsoleAdmin())) throw new Error(`The email ${session.user.email} doesn’t have developer access. Ask a project administrator to add it under Team access.`)
+        if (!active || currentRevision !== revision) return
+        const now = Date.now()
+        const id = session.user.id
+        const name = typeof session.user.user_metadata.full_name === 'string' && session.user.user_metadata.full_name.trim()
+          ? session.user.user_metadata.full_name.trim()
+          : session.user.email.split('@')[0]
+        update((x) => ({
+          ...x,
+          devAccounts: [
+            ...x.devAccounts.filter((account) => account.id !== id),
+            { id, name, email: session.user.email!, active: true, createdAt: new Date(now).toISOString(), lastSignIn: new Date(now).toISOString() },
+          ],
+          devSession: x.devSession?.accountId === id ? x.devSession : { accountId: id, at: now, lastActive: now },
+        }))
+        setAuthAuthorized(true)
+        setAuthError(undefined)
+      } catch (reason) {
+        if (!active || currentRevision !== revision) return
+        setAuthAuthorized(false)
+        setAuthError(reason instanceof Error ? reason.message : 'We couldn’t verify developer access.')
+      } finally {
+        if (active && currentRevision === revision) setAuthReady(true)
+      }
+    }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      window.setTimeout(() => void verify(session), 0)
+    })
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
+  }, [update])
+  useEffect(() => {
+    if (!c.devSession) return
+    const remaining = IDLE_MS - (Date.now() - c.devSession.lastActive)
+    const timer = window.setTimeout(async () => {
+      const { error } = await supabase.auth.signOut()
+      if (error) setAuthError(`Couldn’t end your session. Details: ${error.message}`)
+      else {
+        try {
+          await clearBitinaryBrowserCache()
+        } catch (cacheError: unknown) {
+          const message = cacheError instanceof Error ? cacheError.message : 'Browser cache could not be cleared.'
+          setAuthError(`Signed out, but Bitinary cache could not be cleared: ${message}`)
+        }
+      }
+      update((x) => (x.devSession ? { ...x, devSession: null } : x))
+    }, Math.max(0, remaining))
+    return () => window.clearTimeout(timer)
+  }, [c.devSession, update])
   useEffect(() => {
     if (dev) update((x) => (x.devSession ? { ...x, devSession: { ...x.devSession, lastActive: Date.now() } } : x))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -91,14 +163,55 @@ export function RequireDevAccount() {
     window.addEventListener('pointerdown', on)
     return () => window.removeEventListener('pointerdown', on)
   }, [dev, update])
-  if (!dev) {
-    const s = c.devSession
-    const acc = s && c.devAccounts.find((a) => a.id === s.accountId)
-    const notice = !s ? undefined : !acc ? 'Your account was removed. Ask a teammate for a new one.' : !acc.active ? 'Your account was turned off.' : 'You were signed out after 30 minutes without activity.'
-    return <SignIn notice={notice} />
-  }
-  if (dev.mustChange) return <SetPassword account={dev} />
+  if (!authReady) return <main className="flex min-h-dvh items-center justify-center bg-bg text-fg">Checking developer access…</main>
+  if (authAuthorized && !consoleReady && !dataError) return <ConsoleDataSkeleton />
+  if (authAuthorized && dataError) return <main role="alert" className="flex min-h-dvh items-center justify-center bg-bg px-5 text-center text-danger">We couldn’t load console data. Details: {dataError}</main>
+  if (!authAuthorized || !dev) return <SignIn notice={authError} />
   return <ConsoleLayout />
+}
+
+function ConsoleDataSkeleton() {
+  return (
+    <main role="status" aria-label="Loading developer-console data" aria-busy="true" className="min-h-dvh bg-bg text-fg">
+      <div className="glass flex min-h-16 items-center gap-3 px-4 md:px-8">
+        <Skeleton className="h-4 w-12 rounded-full" />
+        <Skeleton className="h-4 w-40" />
+      </div>
+      <div className="mx-auto max-w-[1280px] px-4 py-6 md:px-8">
+        <Skeleton className="h-9 w-48" />
+        <Skeleton className="mt-2 h-4 w-72 max-w-full" />
+        <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4 2xl:grid-cols-7">
+          {Array.from({ length: 7 }, (_, index) => (
+            <div key={index} className="card flex gap-3 p-4">
+              <Skeleton className="h-11 w-11 shrink-0 rounded-[14px]" />
+              <div className="min-w-0 flex-1">
+                <Skeleton className="h-3 w-16" />
+                <Skeleton className="mt-2 h-7 w-12" />
+                <Skeleton className="mt-2 h-3 w-20" />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+          <div className="card space-y-4 p-5">
+            <Skeleton className="h-5 w-32" />
+            <div className="grid gap-2 sm:grid-cols-2">
+              {Array.from({ length: 4 }, (_, index) => (
+                <Skeleton key={index} className="h-11 rounded-full" />
+              ))}
+            </div>
+            <Skeleton className="h-20 rounded-2xl" />
+          </div>
+          <div className="card space-y-4 p-5">
+            <Skeleton className="h-5 w-36" />
+            {Array.from({ length: 4 }, (_, index) => (
+              <Skeleton key={index} className="h-10" />
+            ))}
+          </div>
+        </div>
+      </div>
+    </main>
+  )
 }
 
 function Brand({ compact }: { compact?: boolean }) {
@@ -141,6 +254,7 @@ function NavList({ onPick, rail }: { onPick?: () => void; rail?: boolean }) {
 
 function ConsoleLayout() {
   const { update } = useConsole()
+  const { showToast } = useStore()
   const { resolved, setMode } = useTheme()
   const { pathname } = useLocation()
   const navigate = useNavigate()
@@ -148,8 +262,18 @@ function ConsoleLayout() {
   const [me, setMe] = useState(false)
   const dev = useCurrentDev()!
   const current = [...flat].reverse().find((n) => isActive(pathname, n.to, n.exact))
-  const signOut = () => {
-    update((x) => x, { area: 'Access', action: 'Signed out' })
+  const signOut = async () => {
+    const { error } = await supabase.auth.signOut()
+    if (error) {
+      showToast({ text: error.message, expression: 'unsure' })
+      return
+    }
+    try {
+      await clearBitinaryBrowserCache()
+    } catch (cacheError: unknown) {
+      const message = cacheError instanceof Error ? cacheError.message : 'Browser cache could not be cleared.'
+      showToast({ text: `Signed out, but Bitinary cache could not be cleared: ${message}`, expression: 'unsure' })
+    }
     update((x) => ({ ...x, devSession: null }))
     navigate(BASE)
   }
@@ -181,7 +305,7 @@ function ConsoleLayout() {
               <span className="rounded-full bg-danger px-2 py-0.5 font-display text-[11px] font-bold tracking-wider text-white">DEV</span>
               <p className="truncate font-display text-[16px] font-semibold">{current?.label ?? 'Console'}</p>
             </div>
-            <SyncDot />
+            <span className="hidden rounded-full bg-ok-bg px-3 py-2 font-display text-[13px] font-medium text-ok sm:inline">Cloud console</span>
             <a href={import.meta.env.BASE_URL} target="_blank" rel="noopener" className="hidden h-10 items-center gap-1.5 rounded-full px-3 font-display text-[14px] font-medium text-link hover:bg-sunken sm:flex xl:hidden">
               <ExternalLink size={16} /> App
             </a>
@@ -229,22 +353,3 @@ function ConsoleLayout() {
 }
 
 export const IDLE_MINUTES = IDLE_MS / 60_000
-
-/** Shows that other tabs on this device (traveler app, /biz) sync live; pulses when a change arrives. */
-function SyncDot() {
-  const [pulse, setPulse] = useState(0)
-  useEffect(() => {
-    const on = () => setPulse((n) => n + 1)
-    window.addEventListener(SYNC_EVENT, on)
-    return () => window.removeEventListener(SYNC_EVENT, on)
-  }, [])
-  return (
-    <span title="Updates from other tabs on this device appear automatically" className="hidden h-9 items-center gap-2 rounded-full bg-ok-bg px-3 font-display text-[13px] font-medium text-ok sm:flex">
-      <span className="relative flex h-2.5 w-2.5">
-        {pulse > 0 && <motion.span key={pulse} initial={{ scale: 1, opacity: 0.8 }} animate={{ scale: 3, opacity: 0 }} transition={{ duration: 1.2 }} className="absolute inset-0 rounded-full bg-ok" />}
-        <span className="relative h-2.5 w-2.5 rounded-full bg-ok" />
-      </span>
-      Live · synced
-    </span>
-  )
-}

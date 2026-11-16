@@ -9,7 +9,6 @@ export type FeedPost = {
   kind: PostKind
   title?: string
   text: string
-  /** Unsplash ids or full URLs; render with `src()` */
   media: string[]
   reelId?: string
   at: string

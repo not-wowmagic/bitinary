@@ -4,29 +4,10 @@ import { useNavigate } from 'react-router'
 import { useAccount } from '@/app/account'
 import { useLang } from '@/app/i18n'
 import { foodOpts, interestOpts, label } from '@/data/themes'
-import { places, type Place } from '@/data/places'
 import { peso } from '@/lib/format'
-import { cardGrid } from '../ui/cardGrid'
-import { ListingCard } from '../cards/ListingCard'
 import { Jimbot } from '../mascot/Jimbot'
 import { Button } from '../ui/Button'
 import { SectionHeader } from '../ui/Section'
-
-const minPrice = (p: Place) => Number(p.priceText.replace(/,/g, '').match(/\d+/)?.[0] ?? 0)
-
-/** Map completed Food / Interests answers to place categories. */
-const toCategory: Record<string, string[]> = {
-  street: ['Street Food'],
-  local: ['Kainan', 'Budget Meals'],
-  coffee: ['Kapihan'],
-  seafood: ['Kainan'],
-  dessert: ['Kapihan', 'Street Food'],
-  fine: ['Kainan'],
-  beach: ['Resorts'],
-  heritage: ['Pasyalan', 'Tours'],
-  photo: ['Pasyalan', 'Tours'],
-  shopping: ['Pasalubong'],
-}
 
 export function personalReason(food: string | undefined, mealBudget: number, lang: 'tl' | 'en') {
   if (lang === 'en') return food ? `For you because you like ${food.toLowerCase()} on a ${peso(mealBudget)} budget` : `For you, within ${peso(mealBudget)} per meal`
@@ -55,14 +36,6 @@ export function ForYou() {
     )
   }
 
-  const keys = [...(st.food === 'done' ? prefs.foods : []), ...(st.interests === 'done' ? prefs.interests : [])]
-  const cats = new Set(keys.flatMap((k) => toCategory[k] ?? []))
-  const budget = st.budget === 'done' ? prefs.mealBudget * (prefs.flexible ? 1.2 : 1) : Infinity
-  const noPork = st.food === 'done' && prefs.diet.includes('nopork')
-  let list = places.filter((p) => p.area !== 'Batangas' || prefs.interests.includes('beach'))
-  list = list.filter((p) => (!cats.size || cats.has(p.category)) && minPrice(p) <= budget && !(noPork && ['p4', 'p5'].includes(p.id)))
-  const exact = list.length > 0
-  if (!exact) list = places.filter((p) => p.area !== 'Batangas').slice(0, 3)
   const food = st.food === 'done' ? label(foodOpts, prefs.foods[0], lang) : st.interests === 'done' ? label(interestOpts, prefs.interests[0], lang) : undefined
 
   return (
@@ -70,12 +43,11 @@ export function ForYou() {
       <SectionHeader title={t('Para sa iyo', 'For you')} action={t('Baguhin', 'Edit')} onAction={() => navigate('/account/preferences')} />
       <p className="flex items-start gap-2 px-4 text-[15px] text-fg-2 md:px-0">
         <Sparkles size={17} className="mt-0.5 shrink-0 text-link" />
-        <span>{exact ? personalReason(food, prefs.mealBudget, lang) : t('Wala pang eksaktong tugma malapit dito, kaya heto muna ang pinakamalapit na verified.', 'No exact match nearby yet, so here are the closest verified spots.')}</span>
+        <span>{personalReason(food, prefs.mealBudget, lang)}</span>
       </p>
-      <div className={cardGrid}>
-        {list.slice(0, 6).map((p) => (
-          <ListingCard key={p.id} place={p} />
-        ))}
+      <div className="mx-4 rounded-[22px] bg-surface p-6 text-center shadow-card md:mx-0 dark:bg-elevated">
+        <Jimbot expression="idea" variant="standalone" size={88} className="mx-auto" />
+        <p className="mt-2 text-body text-fg-2">{t('Wala pang lugar sa database na tugma sa iyo.', 'There are no database places matching you yet.')}</p>
       </div>
     </section>
   )

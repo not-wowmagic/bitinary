@@ -10,7 +10,7 @@ import { cn } from '@/lib/cn'
 import { getForcedState } from '@/lib/forced'
 import { BarChart, Funnel, HeatStrip, LineChart, Sparkline, Stars } from '../charts'
 import { WD, hourLabel, num, shortDay } from '../format'
-import { stats } from '../seed'
+import { useBizStats } from '../statsService'
 import { useBiz } from '../store'
 import { Card, Delta, Pill, StateBlock } from '../ui'
 import { PageHeader } from '../ui'
@@ -26,6 +26,7 @@ function Skeleton({ h = 220 }: { h?: number }) {
 
 export function Analytics() {
   const { t, lang, status, verified, d, showToast } = useBiz()
+  const dbStats = useBizStats({ businessId: d.business.id, live: d.business.live })
   const [params, setParams] = useSearchParams()
   const [range, setRange] = useState<Range>('week')
   const [exp, setExp] = useState(false)
@@ -34,11 +35,10 @@ export function Analytics() {
   const n = range === 'day' ? 24 : range === 'week' ? 7 : 30
 
   const metricLabel: Record<Metric, string> = { views: t('Views ng profile', 'Profile views'), saves: t('Mga save', 'Saves'), trips: t('Sa trip plan', 'Trip-plan adds'), checkins: 'Check-ins' }
-  // Hourly series for "Day" is derived from today's peak-hour curve.
   const today = (new Date().getDay() + 6) % 7
-  const hourly = (m: Metric) => stats.heat[today].map((v) => Math.round(v * (m === 'views' ? 40 : m === 'saves' ? 6 : m === 'trips' ? 3 : 5)))
-  const cur = (m: Metric) => (range === 'day' ? hourly(m) : stats[m].slice(-n))
-  const prev = (m: Metric) => (range === 'day' ? hourly(m).map((v) => Math.round(v * 0.88)) : stats[m].slice(-2 * n, -n))
+  const hourly = (m: Metric) => (m === 'checkins' ? dbStats.heat[today] : Array.from({ length: 24 }, () => 0))
+  const cur = (m: Metric) => (range === 'day' ? hourly(m) : dbStats[m].slice(-n))
+  const prev = (m: Metric) => (range === 'day' ? Array.from({ length: 24 }, () => 0) : dbStats[m].slice(-2 * n, -n))
   const labels = range === 'day' ? Array.from({ length: 24 }, (_, h) => hourLabel(h)) : Array.from({ length: n }, (_, i) => shortDay(Date.now() - (n - 1 - i) * D, lang))
   const rangeText = range === 'day' ? shortDay(Date.now(), lang) : `${shortDay(Date.now() - (n - 1) * D, lang)} – ${shortDay(Date.now(), lang)}`
   const totals = (m: Metric) => sum(cur(m))
@@ -46,8 +46,8 @@ export function Analytics() {
     const p = sum(prev(m))
     return p ? ((totals(m) - p) / p) * 100 : 0
   }
-  const byWeekday = WD[lang].map((_, i) => sum(stats.checkins.slice(-28).filter((__, k) => (new Date(Date.now() - (27 - k) * D).getDay() + 6) % 7 === i)))
-  const src = stats.sources
+  const byWeekday = WD[lang].map((_, i) => sum(dbStats.checkins.slice(-28).filter((__, k) => (new Date(Date.now() - (27 - k) * D).getDay() + 6) % 7 === i)))
+  const src = dbStats.sources
   const topics: Record<string, string> = { taste: t('Lasa', 'Taste'), price: t('Presyo', 'Price'), service: t('Serbisyo', 'Service'), cleanliness: t('Kalinisan', 'Cleanliness') }
   const deal = d.deals.find((x) => x.status === 'ended')
 
@@ -102,6 +102,15 @@ export function Analytics() {
     <main>
       {header}
       <div className="space-y-4 px-4 md:px-8">
+        {dbStats.error && (
+          <div role="alert" className="rounded-[16px] border border-danger/30 bg-danger-bg p-4 text-danger">
+            <p className="font-semibold">{t('Hindi ma-load ang analytics mula sa database.', 'Business analytics could not be loaded from the database.')}</p>
+            <p className="mt-1 break-words text-[14px]">{dbStats.error}</p>
+            <button type="button" className="mt-2 min-h-11 font-semibold underline underline-offset-2" onClick={dbStats.refresh}>
+              {t('Subukan ulit', 'Retry')}
+            </button>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-3">
           <Segmented<Range>
             label={t('Saklaw', 'Range')}
@@ -175,7 +184,7 @@ export function Analytics() {
             </Card>
 
             <Card title={t('Pinaka-abalang oras', 'Peak hours')} icon={<TrendingUp size={20} />} sub={t('Mas madilim, mas maraming bisita', 'Darker means busier')}>
-              <HeatStrip grid={stats.heat} days={WD[lang]} />
+              <HeatStrip grid={dbStats.heat} days={WD[lang]} />
             </Card>
 
             <Card className="xl:col-span-2" title={t('Mga hinahanap malapit sa iyo', 'Top searches near you')} icon={<Lightbulb size={20} />} sub={t('Demand insights sa loob ng 2 km', 'Demand insights within 2 km')}>
@@ -189,7 +198,7 @@ export function Analytics() {
                   </tr>
                 </thead>
                 <tbody>
-                  {stats.topSearches.map((s) => (
+                  {dbStats.topSearches.map((s) => (
                     <tr key={s.q} className="border-b border-line last:border-0">
                       <td className="py-2.5 font-medium">{s.q}</td>
                       <td className="py-2.5 text-right font-display">{num(s.n)}</td>
@@ -214,15 +223,15 @@ export function Analytics() {
 
             <Card title={t('Insight sa mga review', 'Review insights')} icon={<Star size={20} />}>
               <div className="flex items-center gap-3">
-                <span className="font-display text-[34px] font-bold">{stats.ratingAll.toFixed(1)}</span>
+                <span className="font-display text-[34px] font-bold">{dbStats.ratingAll.toFixed(1)}</span>
                 <div className="flex-1">
-                  <Stars value={stats.ratingAll} />
-                  <Sparkline data={stats.rating} height={30} color="var(--c-amber)" />
+                  <Stars value={dbStats.ratingAll} />
+                  <Sparkline data={dbStats.rating} height={30} color="var(--c-amber)" />
                 </div>
               </div>
               <p className="mb-2 mt-3 font-display text-[14px] font-medium">{t('Pinakabanggit na paksa', 'Most mentioned topics')}</p>
               <ul className="space-y-2">
-                {stats.topics.map((x) => (
+                {dbStats.topics.map((x) => (
                   <li key={x.k}>
                     <div className="mb-1 flex justify-between text-[14px]">
                       <span>{topics[x.k]}</span>

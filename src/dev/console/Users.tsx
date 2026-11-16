@@ -1,33 +1,29 @@
-import { ArrowLeft, Ban, Download, LogIn, Search, ShieldCheck, Trash2, UserCog } from 'lucide-react'
+import { ArrowLeft, Ban, Download, Search, ShieldCheck, UserCog } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
-import { useAccount } from '@/app/account'
-import { BIZ_OWNER_ID, useConsole } from '@/app/console'
-import { useSocialData } from '@/app/social'
+import { useConsole } from '@/app/console'
 import { useStore } from '@/app/store'
-import { useBizSnapshot } from '@/app/bizBridge'
-import { IOSAlert } from '@/components/flow/IOSAlert'
 import { Button } from '@/components/ui/Button'
 import { Segmented } from '@/components/ui/Segmented'
-import { placeById } from '@/data/places'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { cn } from '@/lib/cn'
-import { fmtDate, fmtRel, useConsoleUsers, type ConsoleUser } from './data'
+import { supabase } from '@/lib/supabase'
+import { fmtDate, fmtRel, refreshConsoleUsers, useConsoleUsers, useModeration, type ConsoleUser } from './data'
 import { Avatar, Badge, Empty, PageHead, Panel, download, field } from './ui'
 
 type RoleF = 'all' | 'traveler' | 'business'
 type StatusF = 'all' | 'active' | 'suspended'
-type SourceF = 'all' | 'device' | 'sample'
 type Sort = 'newest' | 'active' | 'name'
 
 const methodLabel = { google: 'Google', mobile: 'Mobile', email: 'Email' }
-const sourceLabel = { device: 'This device', biz: 'Bitinary Business', sample: 'Sample' }
+const sourceLabel = { database: 'Supabase Auth' }
 
 function useUserActions() {
   const { update } = useConsole()
   const { showToast } = useStore()
   const suspend = (ids: string[], on: boolean, names: string) => {
     update((x) => ({ ...x, suspended: on ? [...new Set([...x.suspended, ...ids])] : x.suspended.filter((s) => !ids.includes(s)) }), { area: 'Users', action: `${on ? 'Suspended' : 'Unsuspended'} ${names}`, target: ids.length === 1 ? ids[0] : undefined })
-    showToast({ text: on ? `Suspended ${names}` : `Unsuspended ${names}`, expression: on ? 'unsure' : 'celebrating' })
+    showToast({ text: on ? `${names} suspended.` : `${names} unsuspended.`, expression: on ? 'unsure' : 'celebrating' })
   }
   return { suspend }
 }
@@ -39,23 +35,22 @@ function toCsv(list: ConsoleUser[]) {
 }
 
 export function UsersPage() {
-  const users = useConsoleUsers()
+  const { users, loading } = useConsoleUsers()
   const navigate = useNavigate()
   const { suspend } = useUserActions()
   const [q, setQ] = useState('')
   const [role, setRole] = useState<RoleF>('all')
   const [status, setStatus] = useState<StatusF>('all')
-  const [source, setSource] = useState<SourceF>('all')
   const [sort, setSort] = useState<Sort>('newest')
   const [sel, setSel] = useState<string[]>([])
 
   const list = useMemo(() => {
     const n = q.trim().toLowerCase()
     return users
-      .filter((u) => (role === 'all' || u.role === role) && (status === 'all' || (status === 'suspended') === u.suspended) && (source === 'all' || (source === 'sample' ? u.source === 'sample' : u.source !== 'sample')))
+      .filter((u) => (role === 'all' || u.role === role) && (status === 'all' || (status === 'suspended') === u.suspended))
       .filter((u) => !n || [u.name, u.email, u.mobile, u.city].join(' ').toLowerCase().includes(n))
       .sort((a, b) => (sort === 'name' ? a.name.localeCompare(b.name) : sort === 'active' ? b.lastActive.localeCompare(a.lastActive) : b.joined.localeCompare(a.joined)))
-  }, [users, q, role, status, source, sort])
+  }, [users, q, role, status, sort])
   const chosen = users.filter((u) => sel.includes(u.id))
   const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
   const allOn = list.length > 0 && list.every((u) => sel.includes(u.id))
@@ -88,11 +83,6 @@ export function UsersPage() {
               <option value="active">Active</option>
               <option value="suspended">Suspended</option>
             </select>
-            <select aria-label="Source" value={source} onChange={(e) => setSource(e.target.value as SourceF)} className={cn(field, 'w-auto')}>
-              <option value="all">All sources</option>
-              <option value="device">This device</option>
-              <option value="sample">Sample users</option>
-            </select>
             <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as Sort)} className={cn(field, 'w-auto')}>
               <option value="newest">Newest</option>
               <option value="active">Last active</option>
@@ -119,8 +109,21 @@ export function UsersPage() {
           </div>
         )}
 
-        {list.length === 0 ? (
-          <Empty title="No users match" body="Try a different search or filter." />
+        {loading ? (
+          <div role="status" aria-label="Loading users" aria-busy="true" className="divide-y divide-line">
+            {Array.from({ length: 5 }, (_, index) => (
+              <div key={index} className="flex items-center gap-3 px-4 py-3 md:px-5">
+                <Skeleton className="h-10 w-10 shrink-0 rounded-full" />
+                <div className="min-w-0 flex-1">
+                  <Skeleton className="h-4 w-36 max-w-full" />
+                  <Skeleton className="mt-2 h-3 w-52 max-w-full" />
+                </div>
+                <Skeleton className="h-6 w-20 rounded-full" />
+              </div>
+            ))}
+          </div>
+        ) : list.length === 0 ? (
+          <Empty title={users.length ? 'No matching users' : 'No users yet'} body={users.length ? 'Try a different search or filter.' : 'User accounts will appear here after they sign up.'} />
         ) : (
           <>
             {/* Desktop table */}
@@ -153,7 +156,6 @@ export function UsersPage() {
                           <span className="min-w-0">
                             <span className="flex items-center gap-1.5 font-semibold">
                               {u.name}
-                              {u.current && <Badge tone="orange">Signed in</Badge>}
                             </span>
                             <span className="block truncate text-[13px] text-fg-2">{u.email ?? (u.mobile ? `+63 ${u.mobile}` : '—')}</span>
                           </span>
@@ -168,7 +170,6 @@ export function UsersPage() {
                       <td className="py-3 pr-5">
                         <span className="flex flex-wrap gap-1">
                           {u.suspended ? <Badge tone="danger">Suspended</Badge> : <Badge tone="ok">Active</Badge>}
-                          {u.source === 'sample' && <Badge>Sample</Badge>}
                         </span>
                       </td>
                     </tr>
@@ -189,7 +190,7 @@ export function UsersPage() {
                         {u.role === 'business' ? 'Business' : 'Traveler'} · {methodLabel[u.method]} · {fmtRel(u.lastActive)}
                       </span>
                     </span>
-                    {u.suspended ? <Badge tone="danger">Suspended</Badge> : u.source === 'sample' ? <Badge>Sample</Badge> : u.current ? <Badge tone="orange">Signed in</Badge> : null}
+                    {u.suspended ? <Badge tone="danger">Suspended</Badge> : null}
                   </Link>
                 </li>
               ))}
@@ -203,17 +204,17 @@ export function UsersPage() {
 
 export function UserDetail() {
   const { id = '' } = useParams()
-  const users = useConsoleUsers()
+  const { users, loading } = useConsoleUsers()
   const u = users.find((x) => x.id === id)
-  const account = useAccount()
   const { c } = useConsole()
   const { update } = useConsole()
-  const { data } = useSocialData()
-  const biz = useBizSnapshot()
+  const moderation = useModeration()
   const { suspend } = useUserActions()
   const { showToast } = useStore()
   const navigate = useNavigate()
-  const [confirm, setConfirm] = useState(false)
+  if (loading) {
+    return <Panel><Empty title="Loading user…" /></Panel>
+  }
   if (!u) {
     return (
       <Panel>
@@ -221,32 +222,19 @@ export function UserDetail() {
       </Panel>
     )
   }
-  const acc = account.accounts.find((a) => a.id === u.id)
-  const reviews = [...data.reviews.filter((r) => r.authorId === u.id).map((r) => ({ ...r, place: r.placeId })), ...biz.reviews.filter((r) => r.authorId === u.id).map((r) => ({ ...r, place: 'mangben' }))]
-  const comments = [...data.comments.filter((x) => x.authorId === u.id), ...biz.comments.filter((x) => x.authorId === u.id)]
+  const reviews = moderation.filter((item) => item.authorId === u.id && item.kind === 'review')
+  const comments = moderation.filter((item) => item.authorId === u.id && item.kind === 'comment')
   const timeline = c.log.filter((l) => l.target === u.id)
-  const canSignInAs = u.source === 'device' && !!acc && !u.suspended
-
-  const signInAs = () => {
-    if (!acc) return
-    if (!account.signIn(acc, u.method)) return
-    account.setSetupDone(true)
-    account.setResume(null)
-    update((x) => x, { area: 'Users', action: `Signed in as ${u.name}`, target: u.id })
-    window.open(`${import.meta.env.BASE_URL}${u.role === 'business' ? 'biz' : ''}`, '_blank', 'noopener')
-  }
-  const changeRole = (r: 'traveler' | 'business') => {
-    account.setAccountRole(u.id, r)
+  const changeRole = async (r: 'traveler' | 'business') => {
+    const { error } = await supabase.rpc('set_dev_console_user_role', { p_user_id: u.id, p_role: r })
+    if (error) {
+      showToast({ text: `Couldn’t update ${u.name}’s role. Details: ${error.message}`, expression: 'unsure' })
+      return
+    }
     update((x) => x, { area: 'Users', action: `Changed ${u.name} to ${r}`, target: u.id })
-    showToast({ text: `${u.name} is now a ${r === 'business' ? 'business owner' : 'traveler'}`, expression: 'pointing' })
+    refreshConsoleUsers()
+    showToast({ text: `${u.name} is now listed as a ${r === 'business' ? 'business owner' : 'traveler'}.`, expression: 'pointing' })
   }
-  const remove = () => {
-    account.deleteAccount(u.id)
-    update((x) => ({ ...x, suspended: x.suspended.filter((s) => s !== u.id) }), { area: 'Users', action: `Deleted ${u.name}` })
-    showToast({ text: `Deleted ${u.name}`, expression: 'unsure' })
-    navigate('/bitinarydev/users')
-  }
-  const deletable = u.source === 'device' && !account.isSeedAccount(u.id)
 
   return (
     <>
@@ -262,20 +250,14 @@ export function UserDetail() {
             {u.suspended ? <Badge tone="danger">Suspended</Badge> : <Badge tone="ok">Active</Badge>}
             <Badge tone={u.role === 'business' ? 'dark' : 'neutral'}>{u.role === 'business' ? 'Business owner' : 'Traveler'}</Badge>
             <Badge>{sourceLabel[u.source]}</Badge>
-            {u.current && <Badge tone="orange">Signed in on this device</Badge>}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button icon={<LogIn size={17} />} disabled={!canSignInAs} title={canSignInAs ? undefined : u.source === 'sample' ? 'Sample users are read-only' : u.suspended ? 'Unsuspend first' : undefined} onClick={signInAs}>
-            Sign in as
-          </Button>
           <Button variant={u.suspended ? 'secondary' : 'danger'} icon={u.suspended ? <ShieldCheck size={17} /> : <Ban size={17} />} onClick={() => suspend([u.id], !u.suspended, u.name)}>
             {u.suspended ? 'Unsuspend' : 'Suspend'}
           </Button>
         </div>
       </div>
-      {!canSignInAs && u.source === 'sample' && <p className="mt-2 text-[13px] text-fg-2">Sample users are for show. You can suspend them, but not sign in as them.</p>}
-
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <div className="space-y-4">
           <Panel title="Account">
@@ -294,49 +276,21 @@ export function UserDetail() {
               <dd>{u.comments}</dd>
             </dl>
           </Panel>
-          {u.source === 'device' && (
-            <Panel title="Role" sub="Business owners land in Bitinary Business after sign-in.">
-              <Segmented
-                className="w-full"
-                label="Role"
-                value={u.role}
-                onChange={changeRole}
-                options={[
-                  { value: 'traveler', label: 'Traveler' },
-                  { value: 'business', label: 'Business owner' },
-                ]}
-              />
-            </Panel>
-          )}
-          {u.id === BIZ_OWNER_ID && (
-            <Panel title="Business">
-              <p className="text-[14px]">{biz.business.name || 'No business name yet'}</p>
-              <p className="text-[13px] text-fg-2">Verification: {biz.business.verification.status}</p>
-              <Button size="sm" variant="secondary" className="mt-3" onClick={() => navigate('/bitinarydev/businesses')}>
-                Open in Businesses
-              </Button>
-            </Panel>
-          )}
-          {u.current && u.source === 'device' && (
-            <Panel title="Privacy settings">
-              <ul className="space-y-1.5 text-[14px]">
-                {Object.entries({ Location: account.consent.location, Personalization: account.consent.personalization, 'Promos and marketing': account.consent.marketing, 'Share Moments': account.consent.momentsShare }).map(([k, v]) => (
-                  <li key={k} className="flex justify-between">
-                    <span className="text-fg-2">{k}</span>
-                    <span className={v ? 'font-semibold text-ok' : 'text-fg-2'}>{v ? 'On' : 'Off'}</span>
-                  </li>
-                ))}
-              </ul>
-            </Panel>
-          )}
-          {deletable && (
-            <Panel title="Danger zone">
-              <Button variant="danger" icon={<Trash2 size={17} />} onClick={() => setConfirm(true)}>
-                Delete account
-              </Button>
-              <p className="mt-2 text-[13px] text-fg-2">Removes the account from this device. Their reviews stay, shown under their nickname.</p>
-            </Panel>
-          )}
+          <Panel title="Role" sub="This changes the role on the Supabase profile.">
+            <Segmented
+              className="w-full"
+              label="Role"
+              value={u.role}
+              onChange={changeRole}
+              options={[
+                { value: 'traveler', label: 'Traveler' },
+                { value: 'business', label: 'Business owner' },
+              ]}
+            />
+          </Panel>
+          <Panel title="Account management" sub="User creation, password resets and account deletion are managed in Supabase Auth.">
+            <p className="text-[14px] text-fg-2">Passwords are not available to the console and are never stored in the application schema.</p>
+          </Panel>
         </div>
         <div className="space-y-4">
           <Panel title={`Reviews (${reviews.length})`} pad={false}>
@@ -345,17 +299,15 @@ export function UserDetail() {
                 {reviews.map((r) => (
                   <li key={r.id} className="px-4 py-3 md:px-5">
                     <p className="flex items-center justify-between gap-2 text-[14px]">
-                      <a href={`${import.meta.env.BASE_URL}shop/${r.place}?tab=reviews`} target="_blank" rel="noopener" className="font-semibold text-link">
-                        {placeById(r.place)?.name ?? r.place}
-                      </a>
-                      <span className="text-amber">{'★'.repeat(r.stars)}</span>
+                      <span className="font-semibold">{r.placeName}</span>
+                      <span className="text-amber">{'★'.repeat(r.stars ?? 0)}</span>
                     </p>
                     <p className="mt-1 line-clamp-2 text-[14px] text-fg-2">{r.text}</p>
                   </li>
                 ))}
               </ul>
             ) : (
-              <Empty title={u.source === 'sample' ? 'Sample user' : 'No reviews yet'} body={u.source === 'sample' ? `Shown as ${u.reviews} reviews for the demo.` : undefined} />
+              <Empty title="No reviews yet" />
             )}
           </Panel>
           <Panel title={`Comments (${comments.length})`} pad={false}>
@@ -364,7 +316,7 @@ export function UserDetail() {
                 {comments.map((x) => (
                   <li key={x.id} className="px-4 py-3 text-[14px] md:px-5">
                     <p className="line-clamp-2">{x.text}</p>
-                    <p className="text-[12px] text-fg-2">{fmtRel(x.at)}</p>
+                    <p className="text-[12px] text-fg-2">{x.placeName} · {fmtRel(x.at)}</p>
                   </li>
                 ))}
               </ul>
@@ -392,15 +344,6 @@ export function UserDetail() {
           </Panel>
         </div>
       </div>
-      <IOSAlert
-        open={confirm}
-        title={`Delete ${u.name}?`}
-        message="This removes the account from this device. It can't be undone."
-        actions={[
-          { label: 'Cancel', onClick: () => setConfirm(false) },
-          { label: 'Delete', destructive: true, bold: true, onClick: () => (setConfirm(false), remove()) },
-        ]}
-      />
     </>
   )
 }

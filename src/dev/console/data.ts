@@ -1,14 +1,10 @@
-import { useMemo } from 'react'
-import { useAccount } from '@/app/account'
-import { useBizSnapshot } from '@/app/bizBridge'
-import { BIZ_OWNER_ID, useConsole, type Removed } from '@/app/console'
-import { useSocialData } from '@/app/social'
-import { sampleUsers } from '@/data/devUsers'
-import { seedFeedComments, seedFeedPosts, seedFeedReviews } from '@/data/feed'
-import { LINKED_PLACE_ID, placeById } from '@/data/places'
+import { useEffect, useMemo, useState } from 'react'
+import { useConsole, type Removed } from '@/app/console'
+import { useStore } from '@/app/store'
+import { supabase } from '@/lib/supabase'
 
-const D = 864e5
-const ago = (days: number) => new Date(Date.now() - days * D).toISOString()
+const USERS_UPDATED = 'bitinary:console-users-updated'
+const MODERATION_UPDATED = 'bitinary:console-moderation-updated'
 
 export type ConsoleUser = {
   id: string
@@ -17,58 +13,69 @@ export type ConsoleUser = {
   mobile?: string
   role: 'traveler' | 'business'
   method: 'google' | 'mobile' | 'email'
-  source: 'device' | 'sample' | 'biz'
+  source: 'database'
   city?: string
   joined: string
   lastActive: string
   reviews: number
   comments: number
   suspended: boolean
-  current: boolean
 }
 
-/** Every user the console knows about: device accounts, the /biz owner on this device, and sample users. */
-export function useConsoleUsers(): ConsoleUser[] {
-  const acc = useAccount()
-  const biz = useBizSnapshot()
-  const { data } = useSocialData()
+/** User records are loaded from Supabase Auth and profiles, never from local demo accounts. */
+export function useConsoleUsers() {
+  const [records, setRecords] = useState<Omit<ConsoleUser, 'suspended' | 'source'>[]>([])
+  const [loading, setLoading] = useState(true)
   const { c } = useConsole()
-  return useMemo(() => {
-    const count = (id: string) => ({
-      reviews: data.reviews.filter((r) => r.authorId === id).length + biz.reviews.filter((r) => r.authorId === id).length,
-      comments: data.comments.filter((r) => r.authorId === id).length + biz.comments.filter((r) => r.authorId === id).length,
-    })
-    const device: ConsoleUser[] = acc.accounts.map((a) => {
-      const ms = Number(a.id.replace('acc-', ''))
-      const joined = Number.isFinite(ms) && ms > 1e12 ? new Date(ms).toISOString() : ago(240)
-      const current = acc.session?.accountId === a.id
-      return {
-        id: a.id,
-        name: a.name || (current ? acc.profile.name : '') || 'No name yet',
-        email: a.email ?? a.google,
-        mobile: a.mobile,
-        role: a.role,
-        method: current && acc.session?.method ? acc.session.method : a.google ? 'google' : a.mobile ? 'mobile' : 'email',
-        source: 'device',
-        city: current ? acc.profile.city : undefined,
-        joined,
-        lastActive: current ? new Date().toISOString() : joined,
-        ...count(a.id),
-        suspended: c.suspended.includes(a.id),
-        current,
+  const { showToast } = useStore()
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      const { data, error } = await supabase.rpc('get_dev_console_users')
+      if (!active) return
+      if (error) {
+        setLoading(false)
+        showToast({ text: `Could not load database users: ${error.message}`, expression: 'unsure' })
+        return
       }
-    })
-    const owner: ConsoleUser[] = biz.session
-      ? [{ id: BIZ_OWNER_ID, name: biz.profile.name || 'Business owner', email: biz.profile.email || undefined, mobile: biz.profile.mobile || undefined, role: 'business', method: biz.session.method, source: 'biz', city: biz.business.city || undefined, joined: ago(45), lastActive: new Date().toISOString(), reviews: 0, comments: biz.comments.filter((x) => x.reply).length, suspended: c.suspended.includes(BIZ_OWNER_ID), current: true }]
-      : []
-    const samples: ConsoleUser[] = sampleUsers.map((s) => ({ ...s, source: 'sample', joined: ago(s.joinedDaysAgo), lastActive: ago(s.activeDaysAgo), suspended: c.suspended.includes(s.id), current: false }))
-    return [...device, ...owner, ...samples]
-  }, [acc.accounts, acc.session, acc.profile, biz, data, c.suspended])
+      setRecords((Array.isArray(data) ? data : []).map((row) => ({
+        id: row.id,
+        name: row.name || row.email || 'Unnamed user',
+        email: row.email ?? undefined,
+        mobile: row.mobile ?? undefined,
+        role: row.role === 'business' ? 'business' : 'traveler',
+        method: row.method === 'google' || row.method === 'mobile' ? row.method : 'email',
+        city: row.city ?? undefined,
+        joined: row.joined,
+        lastActive: row.lastActive ?? row.joined,
+        reviews: Number(row.reviews ?? 0),
+        comments: Number(row.comments ?? 0),
+      })))
+      setLoading(false)
+    }
+    const refresh = () => { void load() }
+    void load()
+    window.addEventListener(USERS_UPDATED, refresh)
+    return () => {
+      active = false
+      window.removeEventListener(USERS_UPDATED, refresh)
+    }
+  }, [showToast])
+
+  const users = useMemo(() => {
+    return records.map((user) => ({
+      ...user,
+      source: 'database' as const,
+      suspended: c.suspended.includes(user.id),
+    }))
+  }, [records, c.suspended])
+  return { users, loading }
 }
 
 /* ------------------------------ Moderation ------------------------------ */
 
-export type ModItem = { id: string; kind: 'review' | 'comment'; placeId: string; placeName: string; nick: string; authorId?: string; text: string; stars?: number; photos: string[]; at: string; source: 'traveler' | 'sample' | 'biz'; removed?: Removed; flags: string[] }
+export type ModItem = { id: string; kind: 'review' | 'comment'; placeId: string; placeName: string; nick: string; authorId?: string; text: string; stars?: number; photos: string[]; at: string; source: 'traveler' | 'biz'; removed?: Removed; flags: string[] }
 
 const BAD = /\b(scam|gago|tanga|bobo|putang|bwisit)\b/i
 export function flagsFor(text: string) {
@@ -81,25 +88,89 @@ export function flagsFor(text: string) {
   return f
 }
 
-const placeOfPost = (postId: string) => Object.keys(seedFeedPosts).find((pid) => seedFeedPosts[pid].some((p) => p.id === postId)) ?? LINKED_PLACE_ID
-
 export function useModeration(): ModItem[] {
-  const biz = useBizSnapshot()
-  const { data } = useSocialData()
+  const [records, setRecords] = useState<ModItem[]>([])
   const { c } = useConsole()
+  const { showToast } = useStore()
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      const [reviews, comments] = await Promise.all([
+        supabase.from('reviews').select('id,business_id,author_id,stars,body,photo_urls,created_at,hidden,business:businesses(name),author:profiles(name,nickname)').order('created_at', { ascending: false }),
+        supabase.from('comments').select('id,post_id,author_id,body,hidden,reported_reason,created_at,post:posts(business_id,business:businesses(name)),author:profiles(name,nickname)').order('created_at', { ascending: false }),
+      ])
+      if (!active) return
+      const error = reviews.error ?? comments.error
+      if (error) {
+        showToast({ text: `Could not load database moderation records: ${error.message}`, expression: 'unsure' })
+        return
+      }
+      const profileName = (author: { name?: string; nickname?: string } | null) =>
+        author?.nickname || author?.name || 'Unknown user'
+      const reviewRows: ModItem[] = (reviews.data ?? []).map((row) => {
+        const business = row.business as { name?: string } | null
+        const author = row.author as { name?: string; nickname?: string } | null
+        return {
+          id: row.id,
+          kind: 'review',
+          placeId: row.business_id,
+          placeName: business?.name || 'Unknown business',
+          nick: profileName(author),
+          authorId: row.author_id ?? undefined,
+          text: row.body,
+          stars: row.stars,
+          photos: row.photo_urls ?? [],
+          at: row.created_at,
+          source: row.author_id ? 'traveler' : 'biz',
+          removed: row.hidden ? { id: row.id, kind: 'review', reason: 'Hidden by moderator', at: row.created_at } : undefined,
+          flags: flagsFor(row.body),
+        }
+      })
+      const commentRows: ModItem[] = (comments.data ?? []).map((row) => {
+        const post = row.post as { business_id?: string; business?: { name?: string } | null } | null
+        const author = row.author as { name?: string; nickname?: string } | null
+        return {
+          id: row.id,
+          kind: 'comment',
+          placeId: post?.business_id ?? '',
+          placeName: post?.business?.name || 'Unknown business',
+          nick: profileName(author),
+          authorId: row.author_id ?? undefined,
+          text: row.body,
+          photos: [],
+          at: row.created_at,
+          source: row.author_id ? 'traveler' : 'biz',
+          removed: row.hidden ? { id: row.id, kind: 'comment', reason: row.reported_reason || 'Hidden by moderator', at: row.created_at } : undefined,
+          flags: flagsFor(row.body),
+        }
+      })
+      setRecords([...reviewRows, ...commentRows].sort((a, b) => b.at.localeCompare(a.at)))
+    }
+    const refresh = () => { void load() }
+    void load()
+    window.addEventListener(MODERATION_UPDATED, refresh)
+    return () => {
+      active = false
+      window.removeEventListener(MODERATION_UPDATED, refresh)
+    }
+  }, [showToast])
+
   return useMemo(() => {
     const rm = new Map(c.removed.map((r) => [r.id, r]))
-    const name = (id: string) => placeById(id)?.name ?? id
-    const items: ModItem[] = [
-      ...data.reviews.map((r) => ({ id: r.id, kind: 'review' as const, placeId: r.placeId, nick: r.nick, authorId: r.authorId, text: r.text, stars: r.stars, photos: r.photos, at: r.at, source: 'traveler' as const })),
-      ...data.comments.map((x) => ({ id: x.id, kind: 'comment' as const, placeId: placeOfPost(x.postId), nick: x.nick, authorId: x.authorId, text: x.text, photos: [], at: x.at, source: 'traveler' as const })),
-      ...biz.reviews.filter((r) => !r.caseId).map((r) => ({ id: r.id, kind: 'review' as const, placeId: LINKED_PLACE_ID, nick: r.nick, authorId: r.authorId, text: r.text, stars: r.stars, photos: r.photos, at: r.at, source: (r.authorId ? 'traveler' : 'biz') as 'traveler' | 'biz' })),
-      ...biz.comments.filter((x) => !x.blocked).map((x) => ({ id: x.id, kind: 'comment' as const, placeId: LINKED_PLACE_ID, nick: x.nick, authorId: x.authorId, text: x.text, photos: [], at: x.at, source: (x.authorId ? 'traveler' : 'biz') as 'traveler' | 'biz' })),
-      ...Object.values(seedFeedReviews).flat().map((r) => ({ id: r.id, kind: 'review' as const, placeId: r.placeId, nick: r.nick, text: r.text, stars: r.stars, photos: r.photos, at: r.at, source: 'sample' as const })),
-      ...seedFeedComments.map((x) => ({ id: x.id, kind: 'comment' as const, placeId: placeOfPost(x.postId), nick: x.nick, text: x.text, photos: [], at: x.at, source: 'sample' as const })),
-    ].map((x) => ({ ...x, placeName: name(x.placeId), removed: rm.get(x.id), flags: flagsFor(x.text) }))
-    return items.sort((a, b) => b.at.localeCompare(a.at))
-  }, [biz, data, c.removed])
+    return records.map((item) => ({
+      ...item,
+      removed: item.removed ?? rm.get(item.id),
+    }))
+  }, [records, c.removed])
+}
+
+export function refreshConsoleUsers() {
+  window.dispatchEvent(new Event(USERS_UPDATED))
+}
+
+export function refreshModeration() {
+  window.dispatchEvent(new Event(MODERATION_UPDATED))
 }
 
 /* ------------------------------ Storage ------------------------------ */

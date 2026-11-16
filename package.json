@@ -5,15 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "npm run test:jimbot && npm run test:auth",
     "build": "vite build",
+    "test:jimbot": "node tests/jimbot-intents.mjs",
+    "test:auth": "node tests/auth-flow.mjs",
     "preview": "vite preview",
     "format": "oxfmt"
   },
   "dependencies": {
     "@marsidev/react-turnstile": "^1.6.3",
+    "@supabase/server": "^1.9.2",
     "@supabase/supabase-js": "^2.118.0",
     "bootstrap": "^5.3.8",
     "lucide-react": "^1.64.0",
+    "maplibre-gl": "^6.16.0",
     "motion": "^14.8.0",
     "react": "^19.0.0",
     "react-bootstrap": "^2.10.10",

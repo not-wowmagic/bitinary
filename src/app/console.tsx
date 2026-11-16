@@ -1,8 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { places, type Place } from '@/data/places'
-import { promos, sponsored } from '@/data/promos'
-import { usePersistentState } from '@/lib/usePersistentState'
-import type { Verification } from '@/lib/verify'
+import { supabase } from '@/lib/supabase'
+import type { Session } from '@supabase/supabase-js'
 
 /* ------------------------------ Types ------------------------------ */
 
@@ -70,11 +69,6 @@ export type DevAccount = {
   id: string
   name: string
   email: string
-  salt: string
-  /** SHA-256(salt + password), hex */
-  hash: string
-  /** using a default or temporary password; must set their own on next sign-in */
-  mustChange: boolean
   active: boolean
   createdAt: string
   createdBy?: string
@@ -85,8 +79,6 @@ export type DevSession = { accountId: string; at: number; lastActive: number }
 export type ConsoleData = {
   devAccounts: DevAccount[]
   devSession: DevSession | null
-  /** wrong-password counter per email */
-  devFails: Record<string, { count: number; until: number }>
   banners: Banner[]
   theme: ThemeConfig
   /** unsaved edits from the theme editor, shown only in its preview frame */
@@ -96,20 +88,14 @@ export type ConsoleData = {
   announcement: Announcement
   maintenance: { on: boolean; message: string; until?: string }
   suspended: string[]
-  roleOverrides: Record<string, 'traveler' | 'business'>
   removed: Removed[]
   hiddenPlaces: string[]
   featuredPlaces: string[]
-  /** reviewer edits to sample businesses' verification (the /biz business keeps its own) */
-  verifications: Record<string, Verification>
   log: LogEntry[]
 }
 
 /* ------------------------------ Defaults ------------------------------ */
 
-export const DEMO_DEV_EMAIL = 'dev@bitinary.ph'
-/** Console id for the Bitinary Business owner signed in on this device. */
-export const BIZ_OWNER_ID = 'biz-owner'
 export const IDLE_MS = 30 * 60 * 1000
 
 export const defaultTheme: ThemeConfig = {
@@ -134,36 +120,19 @@ export const BODY_FONTS = ['Open Sans', 'Inter', 'Nunito Sans', 'Lato', 'Source 
 
 const now = () => new Date().toISOString()
 
-/** The banners that used to be hard-coded on Home, so nothing changes until the team edits them. */
-const seedBanners: Banner[] = [
-  ...promos.map<Banner>((p, i) => ({ id: `bn-${p.id}`, name: p.title, placement: 'home-carousel', status: 'live', title: p.title, subtitle: p.subtitle, cta: p.cta, image: p.image, tone: p.tone, link: { kind: 'place', placeId: p.placeId }, audience: 'all', priority: i, sponsor: p.placeId, stats: { views: 420 - i * 60, clicks: 38 - i * 5 }, createdAt: now(), label: p.until })),
-  ...sponsored.map<Banner>((a, i) => ({ id: `bn-${a.id}`, name: a.headline, placement: 'home-sponsored', status: 'live', title: a.headline, subtitle: a.body, cta: a.cta, tone: 'brown', link: { kind: 'place', placeId: a.placeId }, audience: 'all', priority: i, sponsor: a.placeId, stats: { views: 980 - i * 200, clicks: 61 - i * 12 }, createdAt: now() })),
-]
-
-const seedAt = '2026-01-05T09:00:00.000Z'
-/** Hashes precomputed for Bitinary2026! (demo owner) and Welcome2026! (teammates). */
-export const seedDevAccounts: DevAccount[] = [
-  { id: 'dev-main', name: 'Bitinary Dev', email: DEMO_DEV_EMAIL, salt: 'b1t1nary-dev-salt', hash: '85f753c0379d0cad5958528ad47e37c5ddfddbf4bf2b098c9ae0b9ccee98c076', mustChange: true, active: true, createdAt: seedAt },
-  { id: 'dev-carla', name: 'Carla Mendoza', email: 'carla@bitinary.ph', salt: 'c4rla-salt-01', hash: '2941ce68fe790af306dde1685992429eb02728c41c2b517a7b760890bd6a71a9', mustChange: true, active: true, createdAt: seedAt, createdBy: 'dev-main' },
-  { id: 'dev-paolo', name: 'Paolo Reyes', email: 'paolo@bitinary.ph', salt: 'pa0lo-salt-02', hash: 'c8e72fce8a8c4e91907d7a40b16866b4be3e42373c5bb1878d99f0d7768b92e6', mustChange: true, active: true, createdAt: seedAt, createdBy: 'dev-main' },
-]
-
 export const initialConsole: ConsoleData = {
-  devAccounts: seedDevAccounts,
+  devAccounts: [],
   devSession: null,
-  devFails: {},
-  banners: seedBanners,
+  banners: [],
   theme: defaultTheme,
   savedPresets: [],
   flags: { reels: true, moments: true, jimbot: true, reviews: true, comments: true, menuScan: true, deals: true, install: true },
-  announcement: { id: 'a0', on: false, text: '', tone: 'info', target: 'all' },
-  maintenance: { on: false, message: 'Nag-aayos kami ng app para mas gumanda pa. Babalik kami agad!' },
+  announcement: { id: 'announcement', on: false, text: '', tone: 'info', target: 'all' },
+  maintenance: { on: false, message: 'Maintenance in progress. Please check back soon.' },
   suspended: [],
-  roleOverrides: {},
   removed: [],
   hiddenPlaces: [],
   featuredPlaces: [],
-  verifications: {},
   log: [],
 }
 
@@ -171,40 +140,178 @@ export const initialConsole: ConsoleData = {
 
 type Ctx = {
   c: ConsoleData
+  ready: boolean
+  dataError: string | null
   /** Update console data; pass `log` to record it in the activity log. */
-  update: (fn: (c: ConsoleData) => ConsoleData, log?: { area: string; action: string; target?: string }) => void
+  update: (fn: (c: ConsoleData) => ConsoleData, log?: { area: string; action: string; target?: string }) => Promise<void>
 }
 const C = createContext<Ctx | null>(null)
 
-/** Fill fields that older saves miss; drop the old shared-PIN fields. */
+/** Fill fields that are missing from older database records. */
 function normalize(x: Partial<ConsoleData> & Record<string, unknown>): ConsoleData {
-  const { pin: _pin, unlockedAt: _u, fails: _f, lockedUntil: _l, ...rest } = x as Record<string, unknown>
-  const r = rest as Partial<ConsoleData>
-  return { ...initialConsole, ...r, devAccounts: r.devAccounts?.length ? r.devAccounts : seedDevAccounts, devFails: r.devFails ?? {}, flags: { ...initialConsole.flags, ...r.flags } }
+  const {
+    devAccounts: _devAccounts,
+    devSession: _devSession,
+    roleOverrides: _roleOverrides,
+    verifications: _verifications,
+    ...rest
+  } = x
+  const saved = rest as Partial<ConsoleData>
+  return {
+    ...initialConsole,
+    ...saved,
+    devAccounts: [],
+    devSession: null,
+    flags: { ...initialConsole.flags, ...saved.flags },
+  }
 }
 
 const previewFrame = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('themePreview')
 
 export function ConsoleProvider({ children }: { children: ReactNode }) {
-  const [stored, setStored] = usePersistentState<ConsoleData>('console', initialConsole)
-  // Older saves may miss newer fields.
-  const c = useMemo<ConsoleData>(() => normalize(stored), [stored])
+  const [c, setC] = useState(initialConsole)
+  const [ready, setReady] = useState(false)
+  const [dataError, setDataError] = useState<string | null>(null)
+  const stateRef = useRef(c)
+  const readyRef = useRef(false)
+  const adminRef = useRef(false)
+  const sessionRef = useRef<Session | null>(null)
+  const loadingSessionIdRef = useRef<string | null | undefined>(undefined)
+  const loadedSessionIdRef = useRef<string | null | undefined>(undefined)
+  const revisionRef = useRef(0)
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const saveResolversRef = useRef<Array<() => void>>([])
 
-  // Other tabs and the theme-preview iframe follow console changes live via usePersistentState.
+  const loadConsole = useCallback(async (session: Session | null) => {
+    const sessionId = session?.user.id ?? null
+    if (loadingSessionIdRef.current === sessionId || (readyRef.current && loadedSessionIdRef.current === sessionId)) return
 
-  const update = useCallback<Ctx['update']>(
-    (fn, log) =>
-      setStored((x) => {
-        const cur = normalize(x)
-        const next = fn(cur)
-        // Stamp who did it from the session that was active when the action ran.
-        const by = cur.devAccounts.find((a) => a.id === cur.devSession?.accountId)?.name
-        return log ? { ...next, log: [{ id: `l${Date.now()}${Math.random().toString(36).slice(2, 5)}`, at: now(), by, ...log }, ...next.log].slice(0, 200) } : next
-      }),
-    [setStored],
-  )
+    const revision = ++revisionRef.current
+    loadingSessionIdRef.current = sessionId
+    readyRef.current = false
+    setReady(false)
+    setDataError(null)
+    sessionRef.current = session
+
+    try {
+      let next = initialConsole
+      adminRef.current = false
+      if (session) {
+        const { data: admin, error: adminError } = await supabase.rpc('is_dev_console_admin')
+        if (adminError) throw adminError
+        if (admin) {
+          const { data: row, error: stateError } = await supabase.from('dev_console_state').select('data').eq('id', 1).maybeSingle()
+          if (stateError) throw stateError
+          next = normalize((row?.data ?? {}) as Partial<ConsoleData> & Record<string, unknown>)
+          adminRef.current = true
+        } else {
+          const { data: publicState, error: publicError } = await supabase.rpc('get_public_dev_console_settings')
+          if (publicError) throw publicError
+          next = normalize((publicState ?? {}) as Partial<ConsoleData> & Record<string, unknown>)
+        }
+      } else {
+        const { data: publicState, error: publicError } = await supabase.rpc('get_public_dev_console_settings')
+        if (publicError) throw publicError
+        next = normalize((publicState ?? {}) as Partial<ConsoleData> & Record<string, unknown>)
+      }
+
+      if (revision !== revisionRef.current) return
+      const activeId = session?.user.id
+      const previousSession = stateRef.current.devSession
+      const currentDeveloper = activeId
+        ? stateRef.current.devAccounts.filter((account) => account.id === activeId)
+        : []
+      next = {
+        ...next,
+        devAccounts: currentDeveloper,
+        devSession: previousSession?.accountId === activeId ? previousSession : null,
+      }
+      stateRef.current = next
+      setC(next)
+    } catch (reason) {
+      if (revision !== revisionRef.current) return
+      adminRef.current = false
+      const message = reason instanceof Error ? reason.message : 'Unable to load developer-console data.'
+      setDataError(message)
+    } finally {
+      if (revision === revisionRef.current) {
+        loadedSessionIdRef.current = sessionId
+        loadingSessionIdRef.current = undefined
+        readyRef.current = true
+        setReady(true)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    localStorage.removeItem('bitinary:console')
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') return
+      window.setTimeout(() => void loadConsole(session), 0)
+    })
+    return () => {
+      revisionRef.current++
+      subscription.unsubscribe()
+    }
+  }, [loadConsole])
+
+  useEffect(() => {
+    stateRef.current = c
+  }, [c])
+
+  useEffect(() => {
+    if (!ready || !adminRef.current) return
+    const channel = supabase
+      .channel('dev-console-state')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'dev_console_state', filter: 'id=eq.1' }, (payload) => {
+        const remote = normalize(payload.new.data as Partial<ConsoleData> & Record<string, unknown>)
+        remote.devAccounts = stateRef.current.devAccounts
+        remote.devSession = stateRef.current.devSession
+        stateRef.current = remote
+        setC(remote)
+      })
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setDataError('Live console sync could not connect. Reload to fetch the latest saved data.')
+      })
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [ready])
+
+  const update = useCallback<Ctx['update']>((fn, log) => {
+    const cur = stateRef.current
+    const next = fn(cur)
+    const by = cur.devAccounts.find((account) => account.id === cur.devSession?.accountId)?.name
+    const withLog = log
+      ? { ...next, log: [{ id: `l${Date.now()}${Math.random().toString(36).slice(2, 5)}`, at: now(), by, ...log }, ...next.log].slice(0, 200) }
+      : next
+    stateRef.current = withLog
+    setC(withLog)
+
+    if (!adminRef.current || !readyRef.current) return Promise.resolve()
+    const savePromise = new Promise<void>((resolve) => saveResolversRef.current.push(resolve))
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      const { devAccounts: _devAccounts, devSession: _devSession, ...data } = stateRef.current
+      const resolvers = saveResolversRef.current.splice(0)
+      saveQueueRef.current = saveQueueRef.current.then(async () => {
+        const { error } = await supabase.from('dev_console_state').upsert({
+          id: 1,
+          data,
+          updated_by: sessionRef.current?.user.id ?? null,
+        })
+        if (error) throw error
+        setDataError(null)
+      }).catch((reason: unknown) => {
+        setDataError(reason instanceof Error ? reason.message : 'Unable to save developer-console data.')
+      }).finally(() => resolvers.forEach((resolve) => resolve()))
+    }, 250)
+    return savePromise
+  }, [])
+
   return (
-    <C.Provider value={{ c, update }}>
+    <C.Provider value={{ c, update, ready, dataError }}>
       <ThemeOverrides theme={previewFrame && c.themeDraft ? c.themeDraft : c.theme} />
       {children}
     </C.Provider>
@@ -248,12 +355,16 @@ export type Viewer = 'guests' | 'travelers' | 'business'
 
 /** Live banners for a placement, for this kind of viewer, in priority order. */
 export function useBanners(placement: Placement, viewer: Viewer) {
-  const { c, update } = useConsole()
+  const { c } = useConsole()
   const list = useMemo(
     () => c.banners.filter((b) => b.placement === placement && bannerActive(b) && (b.audience === 'all' || b.audience === viewer) && !(b.link.kind === 'place' && c.hiddenPlaces.includes(b.link.placeId))).sort((a, b) => a.priority - b.priority),
     [c.banners, c.hiddenPlaces, placement, viewer],
   )
-  const bump = useCallback((id: string, key: 'views' | 'clicks') => update((x) => ({ ...x, banners: x.banners.map((b) => (b.id === id ? { ...b, stats: { ...b.stats, [key]: b.stats[key] + 1 } } : b)) })), [update])
+  const bump = useCallback((id: string, key: 'views' | 'clicks') => {
+    void supabase.rpc('track_dev_console_banner_event', { banner_id: id, event_type: key }).then(({ error }) => {
+      if (error) console.error('Unable to track banner event', error)
+    })
+  }, [])
   return { list, trackClick: (id: string) => bump(id, 'clicks'), trackView: bump }
 }
 

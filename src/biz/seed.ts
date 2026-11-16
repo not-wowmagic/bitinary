@@ -83,7 +83,7 @@ export const demoBusiness: BusinessProfile = {
   price: '₱₱',
   address: '1247 M.H. del Pilar St., Ermita',
   city: 'Maynila',
-  pin: { x: 54, y: 58 },
+  pin: { lng: 120.9842, lat: 14.5995 },
   contactName: 'Ben Dizon',
   mobile: '9171234500',
   landline: '(02) 8521 4410',

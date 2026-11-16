@@ -1,8 +1,8 @@
 import { motion } from 'motion/react'
 import type { ReactNode } from 'react'
-import appIcon from '@/assets/jimbot/app-icon.png'
 import celebrate from '@/assets/jimbot/celebrate.png'
 import directions from '@/assets/jimbot/directions.png'
+import face from '@/assets/jimbot/face.png'
 import hello from '@/assets/jimbot/hello.png'
 import idea from '@/assets/jimbot/idea.png'
 import { cn } from '@/lib/cn'
@@ -106,9 +106,6 @@ type Props = {
   shape?: 'circle' | 'squircle'
 }
 
-/* Face crop of the 500px artboard: center (250,230), radius 125. */
-const FACE = { cx: 250, cy: 230, r: 125 }
-
 export function Jimbot({ expression = 'waving', variant = 'badge', crop = 'full', size = 120, animate = true, className, title, shape = 'circle' }: Props) {
   const reduce = useReducedMotion()
   const live = animate && !reduce && crop === 'full'
@@ -117,16 +114,11 @@ export function Jimbot({ expression = 'waving', variant = 'badge', crop = 'full'
   const props = placeholderProps[expression]
 
   if (crop === 'head' && shape === 'squircle') {
-    return <img src={appIcon} alt={label} width={size} height={size} draggable={false} className={cn('shrink-0 select-none rounded-[22.5%]', className)} style={{ width: size, height: size }} />
+    return <img src={face} alt={label} width={size} height={size} draggable={false} className={cn('shrink-0 select-none object-contain', className)} style={{ width: size, height: size }} />
   }
 
   if (crop === 'head') {
-    const k = size / (FACE.r * 2)
-    return (
-      <span role="img" aria-label={label} className={cn('relative inline-block shrink-0 overflow-hidden rounded-full bg-primary', className)} style={{ width: size, height: size }}>
-        <img src={src} alt="" draggable={false} className="absolute max-w-none select-none" style={{ width: 500 * k, height: 500 * k, left: -(FACE.cx - FACE.r) * k, top: -(FACE.cy - FACE.r) * k }} />
-      </span>
-    )
+    return <img src={face} alt={label} width={size} height={size} draggable={false} className={cn('shrink-0 select-none object-contain', className)} style={{ width: size, height: size }} />
   }
 
   const motionProps = live

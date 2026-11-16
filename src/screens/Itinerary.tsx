@@ -1,6 +1,6 @@
 import { CloudCheck, GripVertical, Pencil, Plus, Save, Share, Sparkles, Trash2 } from 'lucide-react'
 import { Reorder, useDragControls } from 'motion/react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { useAccount } from '@/app/account'
 import { useItineraryStops, useStore } from '@/app/store'
@@ -18,10 +18,108 @@ import { placeById } from '@/data/places'
 import { cn } from '@/lib/cn'
 import { peso } from '@/lib/format'
 import { useOpen } from '@/lib/useOpen'
+import { supabase } from '@/lib/supabase'
 
 export function ItineraryScreen() {
   const { id = '' } = useParams()
-  return <ItineraryView id={id} />
+  return itineraryById(id) ? <ItineraryView id={id} /> : <SavedItineraryDetail id={id} />
+}
+
+type SavedItinerary = { id: string; title: string; subtitle: string | null; area: string | null; budget: number }
+type SavedItineraryStop = { id: string; business_id: string | null; stop_time: string; name: string; kind: string; cost: number; note: string | null }
+
+function SavedItineraryDetail({ id }: { id: string }) {
+  const navigate = useNavigate()
+  const [itinerary, setItinerary] = useState<SavedItinerary | null>(null)
+  const [stops, setStops] = useState<SavedItineraryStop[]>([])
+  const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      const { data, error } = await supabase
+        .from('itineraries')
+        .select('id, title, subtitle, area, budget')
+        .eq('id', id)
+        .eq('is_saved', true)
+        .maybeSingle()
+      if (!active) return
+      if (error) {
+        console.error('Saved itinerary lookup failed', error)
+        setFailed(true)
+        setLoading(false)
+        return
+      }
+      if (!data) {
+        setLoading(false)
+        return
+      }
+      setItinerary({ ...data, budget: Number(data.budget) })
+      const { data: savedStops, error: stopsError } = await supabase
+        .from('itinerary_stops')
+        .select('id, business_id, stop_time, name, kind, cost, note')
+        .eq('itinerary_id', id)
+        .order('sort_order', { ascending: true })
+      if (!active) return
+      if (stopsError) {
+        console.error('Saved itinerary stops lookup failed', stopsError)
+        setFailed(true)
+      } else {
+        setStops((savedStops ?? []).map((stop) => ({ ...stop, cost: Number(stop.cost) })))
+      }
+      setLoading(false)
+    })()
+    return () => {
+      active = false
+    }
+  }, [id])
+
+  if (loading) return <p className="mx-auto max-w-[760px] px-4 py-10 text-fg-2">Kinukuha ang naka-save na itinerary…</p>
+  if (failed || !itinerary) {
+    return (
+      <StateView
+        expression="unsure"
+        title={failed ? 'Hindi ma-load ang itinerary' : 'Walang ganitong naka-save na itinerary'}
+        body={failed ? 'Hindi ma-access ang database. Subukan ulit mamaya.' : 'Baka tinanggal na ito o wala kang pahintulot na makita ito.'}
+        action="Bumalik"
+        onAction={() => navigate(-1)}
+      />
+    )
+  }
+
+  return (
+    <main className="mx-auto min-h-dvh max-w-[760px] pb-24">
+      <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-line bg-bg/90 px-4 py-3 backdrop-blur-xl">
+        <BackButton />
+        <div className="min-w-0">
+          <p className="text-caption text-fg-2">Naka-save na itinerary · {itinerary.area || 'Lugar unavailable'}</p>
+          <h1 className="truncate text-h2">{itinerary.title}</h1>
+        </div>
+      </div>
+      {itinerary.subtitle && <p className="px-4 pt-4 text-body text-fg-2">{itinerary.subtitle}</p>}
+      <p className="mx-4 mt-4 rounded-2xl bg-surface px-4 py-3 font-semibold">Budget: ₱{itinerary.budget.toLocaleString()}</p>
+      <section className="space-y-2 px-4 pt-4">
+        <h2 className="text-h3">Mga hinto</h2>
+        {stops.length ? stops.map((stop) => (
+          <button
+            key={stop.id}
+            type="button"
+            disabled={!stop.business_id}
+            onClick={() => stop.business_id && navigate(`/shop/${stop.business_id}`)}
+            className="card flex w-full items-center gap-3 p-3 text-left disabled:cursor-default"
+          >
+            <span className="w-20 shrink-0 text-sm text-fg-2">{stop.stop_time}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-semibold">{stop.name}</span>
+              <span className="block text-sm text-fg-2">{[stop.kind, stop.note].filter(Boolean).join(' · ')}</span>
+            </span>
+            <span className="shrink-0 text-sm">₱{stop.cost.toLocaleString()}</span>
+          </button>
+        )) : <p className="text-sm text-fg-2">Wala pang naka-save na hinto.</p>}
+      </section>
+    </main>
+  )
 }
 
 export function ItineraryView({ id, embedded }: { id: string; embedded?: boolean }) {

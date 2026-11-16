@@ -2,7 +2,7 @@ import { ArrowRight, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
-import { useAccount, type ThemeStatus, type TravelerThemeId } from '@/app/account'
+import { skipAllTravelerPreferences, useAccount, type ThemeStatus, type TravelerThemeId } from '@/app/account'
 import { useLang } from '@/app/i18n'
 import { Jimbot } from '@/components/mascot/Jimbot'
 import { HubLayout } from '@/components/onboarding/HubLayout'
@@ -41,7 +41,7 @@ export function ThanksCard({ onClose }: { onClose: () => void }) {
 export function PersonalizeHub() {
   const { id } = useParams<{ id?: TravelerThemeId }>()
   const [params, setParams] = useSearchParams()
-  const { prefs, session } = useAccount()
+  const { prefs, session, setPrefs, setSetupDone, setResume } = useAccount()
   const { lang, t } = useLang()
   const navigate = useNavigate()
   const bp = useBreakpoint()
@@ -59,7 +59,16 @@ export function PersonalizeHub() {
     return () => clearTimeout(tm)
   }, [thanks, setParams])
 
-  const exit = () => navigate(from === 'prefs' ? '/account/preferences' : '/', { replace: true })
+  const exit = () => {
+    if (from !== 'prefs' && session?.kind === 'user') {
+      if (Object.keys(prefs.status).length === 0) {
+        setPrefs((current) => skipAllTravelerPreferences(current))
+      }
+      setSetupDone(true)
+      setResume(null)
+    }
+    navigate(from === 'prefs' ? '/account/preferences' : '/', { replace: true })
+  }
   const open = (tid: TravelerThemeId) => navigate(`/personalize/${tid}${from ? `?from=${from}` : ''}`)
   const onDone = (tid: TravelerThemeId) => (s: 'done' | 'skipped') => {
     if (from === 'prefs' && !desktop) return navigate('/account/preferences', { replace: true })

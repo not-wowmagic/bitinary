@@ -1,10 +1,10 @@
 import {
   ArrowLeft, Bell, Check, CalendarCheck, ChevronDown, CreditCard, Download, Globe, HelpCircle, KeyRound, Laptop, Link2, LogOut, Mail, MessageCircle, Moon, Phone, QrCode, Rocket, Shield, Smartphone, Store, Tag, Trash2, User, Users,
 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { useTheme, type ThemeMode } from '@/app/theme'
-import { GoogleLogo, inputBase } from '@/components/flow/Fields'
+import { GoogleLogo, inputBase, PasswordField } from '@/components/flow/Fields'
 import { IOSAlert } from '@/components/flow/IOSAlert'
 import { Jimbot } from '@/components/mascot/Jimbot'
 import { Button } from '@/components/ui/Button'
@@ -12,6 +12,9 @@ import { Segmented } from '@/components/ui/Segmented'
 import { Sheet } from '@/components/ui/Sheet'
 import { Toggle } from '@/components/ui/Toggle'
 import { cn } from '@/lib/cn'
+import { isGoogleOnlyAccount } from '@/lib/authFlow'
+import { updatePassword } from '@/lib/passwordAuth'
+import { supabase } from '@/lib/supabase'
 import { formatPH } from '@/screens/signup/Signup'
 import { longDate } from '../format'
 import type { Staff } from '../seed'
@@ -36,7 +39,7 @@ export function SubPage({ title, children, phase, actions }: { title: string; ch
 }
 
 export function AccountHome() {
-  const { d, t, lang, reset, set, status, verified } = useBiz()
+  const { d, t, lang, reset, signOut, status, verified } = useBiz()
   const navigate = useNavigate()
   const [out, setOut] = useState(false)
   return (
@@ -86,7 +89,15 @@ export function AccountHome() {
         title={t('Mag-sign out?', 'Sign out?')}
         actions={[
           { label: t('Kanselahin', 'Cancel'), onClick: () => setOut(false) },
-          { label: t('Mag-sign out', 'Sign out'), destructive: true, bold: true, onClick: () => (set((x) => ({ ...x, session: null })), navigate('/biz/welcome')) },
+          {
+            label: t('Mag-sign out', 'Sign out'),
+            destructive: true,
+            bold: true,
+            onClick: async () => {
+              const result = await signOut()
+              if (!result.error) navigate('/welcome', { replace: true })
+            },
+          },
         ]}
       />
     </main>
@@ -97,6 +108,41 @@ export function ProfilePage() {
   const { d, set, t, lang, showToast } = useBiz()
   const [p, setP] = useState(d.profile)
   const [pw, setPw] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [requiresCurrentPassword, setRequiresCurrentPassword] = useState(true)
+  const [passwordBusy, setPasswordBusy] = useState(false)
+  const [passwordError, setPasswordError] = useState<string | null>(null)
+  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null)
+  useEffect(() => {
+    if (!pw) return
+    let active = true
+    void supabase.auth
+      .getUser()
+      .then(({ data, error }) => {
+        if (!active) return
+        if (error) {
+          setPasswordError(error.message)
+          return
+        }
+        setRequiresCurrentPassword(!isGoogleOnlyAccount(data.user?.app_metadata?.providers))
+      })
+      .catch((error: unknown) => {
+        if (active) setPasswordError(error instanceof Error ? error.message : 'Could not load account security settings.')
+      })
+    return () => {
+      active = false
+    }
+  }, [pw])
+  const closePasswordSheet = () => {
+    setPw(false)
+    setCurrentPassword('')
+    setNewPassword('')
+    setConfirmPassword('')
+    setPasswordError(null)
+    setPasswordSuccess(null)
+  }
   const devices = [
     { icon: <Laptop size={20} />, name: 'Chrome · Windows', where: 'Ermita, Maynila', now: true },
     { icon: <Smartphone size={20} />, name: 'Bitinary Business · iPhone', where: 'Ermita, Maynila' },
@@ -151,16 +197,43 @@ export function ProfilePage() {
           ))}
         </ul>
       </Card>
-      <Sheet open={pw} onClose={() => setPw(false)} title={t('Palitan ang password', 'Change password')}>
+      <Sheet open={pw} onClose={closePasswordSheet} title={t('Palitan ang password', 'Change password')}>
         <div className="space-y-3">
-          {[t('Kasalukuyang password', 'Current password'), t('Bagong password', 'New password'), t('Ulitin ang bagong password', 'Repeat new password')].map((l) => (
-            <label key={l} className="block">
-              <span className="mb-1.5 block font-display text-[14px] font-medium">{l}</span>
-              <input type="password" className={cn(inputBase, 'border-line')} />
-            </label>
-          ))}
-          <Button block size="lg" onClick={() => (setPw(false), showToast({ text: t('Napalitan ang password', 'Password changed') }))}>
-            {t('I-save', 'Save')}
+          {requiresCurrentPassword ? (
+            <PasswordField label={t('Kasalukuyang password', 'Current password')} autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
+          ) : (
+            <p className="text-caption text-fg-2">{t('Naka-sign in ka gamit ang Google. Magtakda ng password para makapag-sign in ka rin gamit ang email.', 'You are signed in with Google. Set a password to also sign in with email.')}</p>
+          )}
+          <PasswordField label={t('Bagong password', 'New password')} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+          <PasswordField label={t('Kumpirmahin ang password', 'Confirm password')} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
+          {passwordError && <p role="alert" className="text-caption text-danger">{passwordError}</p>}
+          {passwordSuccess && <p role="status" className="text-caption text-fg-2">{passwordSuccess}</p>}
+          <Button
+            block
+            size="lg"
+            disabled={passwordBusy || newPassword.length < 8 || newPassword !== confirmPassword || (requiresCurrentPassword && !currentPassword)}
+            onClick={async () => {
+              setPasswordBusy(true)
+              setPasswordError(null)
+              try {
+                const result = await updatePassword(newPassword, requiresCurrentPassword ? currentPassword : undefined)
+                if (result.error) {
+                  setPasswordError(result.error)
+                  return
+                }
+                setPasswordSuccess(t('Napalitan ang password', 'Password changed'))
+                setCurrentPassword('')
+                setNewPassword('')
+                setConfirmPassword('')
+                showToast({ text: t('Napalitan ang password', 'Password changed') })
+              } catch (updateError: unknown) {
+                setPasswordError(updateError instanceof Error ? updateError.message : 'Could not update the password.')
+              } finally {
+                setPasswordBusy(false)
+              }
+            }}
+          >
+            {passwordBusy ? t('Sine-save…', 'Saving…') : t('I-save', 'Save')}
           </Button>
         </div>
       </Sheet>

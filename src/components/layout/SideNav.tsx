@@ -2,6 +2,7 @@ import { Download, Moon, Sun } from 'lucide-react'
 import { motion } from 'motion/react'
 import { Link, useLocation } from 'react-router'
 import { useStore } from '@/app/store'
+import { useLang } from '@/app/i18n'
 import { useTheme } from '@/app/theme'
 import { cn } from '@/lib/cn'
 import { useInstallPrompt } from '@/lib/useInstallPrompt'
@@ -11,10 +12,12 @@ import { tabs } from './nav'
 /** Tablet: 88px glass navigation rail. */
 export function NavRail() {
   const { pathname } = useLocation()
+  const { t: translate } = useLang()
+  const label = (to: string) => translate(to === '/' ? 'Home' : to === '/jimbot' ? 'Jimbot' : to === '/search' ? 'Hanap' : to === '/moments' ? 'Moments' : 'Account', to === '/' ? 'Home' : to === '/jimbot' ? 'Jimbot' : to === '/search' ? 'Search' : to === '/moments' ? 'Moments' : 'Account')
   return (
-    <nav aria-label="Pangunahing navigation" className="glass fixed inset-y-0 left-0 z-50 hidden w-[88px] flex-col items-center gap-2 border-r py-5 md:flex xl:hidden">
+    <nav aria-label={translate('Pangunahing nabigasyon', 'Main navigation')} className="glass fixed inset-y-0 left-0 z-50 hidden w-[88px] flex-col items-center gap-2 border-r py-5 md:flex xl:hidden">
       <Link to="/" aria-label="Bitinary home" className="mb-4">
-        <Jimbot crop="head" size={46} animate={false} shape="squircle" />
+        <Jimbot crop="full" variant="standalone" size={46} animate={false} />
       </Link>
       {tabs.map((t) => {
         const active = t.match(pathname)
@@ -28,7 +31,7 @@ export function NavRail() {
           >
             {active && <motion.span layoutId="rail-capsule" className="absolute inset-0 rounded-[22px] bg-primary" />}
             <Icon active={active} className="relative" />
-            <span className="relative font-display text-[11px] font-medium">{t.label}</span>
+            <span className="relative font-display text-[11px] font-medium">{label(t.to)}</span>
           </Link>
         )
       })}
@@ -39,18 +42,19 @@ export function NavRail() {
 /** Desktop: 248px sidebar. */
 export function Sidebar() {
   const { pathname } = useLocation()
+  const { t: translate } = useLang()
   const { setPanel, panel } = useStore()
   const { resolved, setMode } = useTheme()
   const install = useInstallPrompt()
   return (
     <aside className="fixed inset-y-0 left-0 z-50 hidden w-[248px] flex-col border-r border-line bg-surface px-4 py-6 xl:flex">
       <Link to="/" className="mb-8 flex items-center gap-2.5 px-2">
-        <Jimbot crop="head" size={42} animate={false} shape="squircle" />
+        <Jimbot crop="full" variant="standalone" size={42} animate={false} />
         <span className="font-display text-[22px] font-bold tracking-tight">
           Bit<span className="text-primary">inary</span>
         </span>
       </Link>
-      <nav aria-label="Pangunahing navigation" className="flex flex-col gap-1">
+      <nav aria-label={translate('Pangunahing nabigasyon', 'Main navigation')} className="flex flex-col gap-1">
         {tabs.map((t) => {
           const active = t.match(pathname)
           const Icon = t.icon
@@ -66,7 +70,7 @@ export function Sidebar() {
             >
               {active && <motion.span layoutId="side-capsule" className="absolute inset-0 rounded-2xl bg-primary" />}
               <Icon active={active} className="relative" />
-              <span className="relative">{t.label}</span>
+              <span className="relative">{translate(t.to === '/' ? 'Home' : t.to === '/jimbot' ? 'Jimbot' : t.to === '/search' ? 'Hanap' : t.to === '/moments' ? 'Moments' : 'Account', t.to === '/' ? 'Home' : t.to === '/jimbot' ? 'Jimbot' : t.to === '/search' ? 'Search' : t.to === '/moments' ? 'Moments' : 'Account')}</span>
             </Link>
           )
         })}
@@ -76,7 +80,7 @@ export function Sidebar() {
         onClick={() => setPanel(panel?.type === 'jimbot' ? null : { type: 'jimbot' })}
         className="mt-6 flex items-center gap-3 rounded-[20px] bg-brown p-3 text-left text-cream dark:bg-elevated"
       >
-        <Jimbot crop="head" size={44} animate={false} />
+        <Jimbot crop="full" variant="standalone" size={44} animate={false} />
         <span>
           <span className="block font-display text-[14px] font-semibold">Tanungin si Jimbot</span>
           <span className="block text-[12px] text-[#E8CDB9]">Gawa tayo ng itinerary</span>

@@ -1,18 +1,25 @@
-import { ChevronDown, Clock, Search as SearchIcon, TrendingUp, X } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { ChevronDown, Clock, Search as SearchIcon, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { CategoryTile, categories } from '@/components/cards/CategoryTile'
-import { ListingCard } from '@/components/cards/ListingCard'
+import type { Category } from '@/data/places'
 import { StateView } from '@/components/states/States'
 import { Chip } from '@/components/ui/Chip'
-import { PhaseTag } from '@/components/ui/PhaseTag'
 import { Sheet } from '@/components/ui/Sheet'
-import { places, type Category } from '@/data/places'
-import { recentSearches, trendingSearches } from '@/data/searches'
 import { usePersistentState } from '@/lib/usePersistentState'
+import { supabase } from '@/lib/supabase'
 
-const areas = ['Intramuros', 'Binondo', 'Ermita', 'Batangas']
 const prices = ['₱', '₱₱', '₱₱₱'] as const
+type SearchBusiness = {
+  id: string
+  name: string
+  business_type: string | null
+  price_range: string | null
+  address: string
+  city: string
+  about: string
+  specialties: string[]
+}
 
 export function SearchScreen() {
   const [params, setParams] = useSearchParams()
@@ -23,8 +30,13 @@ export function SearchScreen() {
   const [price, setPrice] = useState<string | null>(null)
   const [openNow, setOpenNow] = useState(false)
   const [sheet, setSheet] = useState<'cat' | 'area' | 'price' | null>(null)
-  const [recent, setRecent] = usePersistentState('recentSearches', recentSearches)
+  const [recent, setRecent] = usePersistentState<string[]>('recentSearches', [])
+  const [results, setResults] = useState<SearchBusiness[]>([])
+  const [areaOptions, setAreaOptions] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const [text, setText] = useState(q)
 
   const set = (k: string, v: string | null) =>
     setParams(
@@ -36,18 +48,43 @@ export function SearchScreen() {
       { replace: true },
     )
 
+  // Keep local text in sync when q changes externally (e.g. clicking a recent search)
+  useEffect(() => { setText(q) }, [q])
+
   const active = !!(q || cat || area || price || openNow)
-  const results = useMemo(() => {
-    const needle = q.toLowerCase().trim()
-    return places.filter((p) => {
-      if (cat && p.category !== cat) return false
-      if (area && p.area !== area) return false
-      if (price && p.priceRange !== price) return false
-      if (openNow && p.status === 'closed') return false
-      if (!needle) return true
-      const hay = [p.name, p.category, p.area, p.description, ...p.tags, ...p.menu.map((m) => m.name)].join(' ').toLowerCase()
-      return needle.split(/\s+/).every((w) => hay.includes(w))
-    })
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setLoadError(false)
+    void (async () => {
+      const { data, error } = await supabase
+        .from('businesses')
+        .select('id, name, business_type, price_range, address, city, about, specialties')
+        .eq('live', true)
+      if (!active) return
+      if (error) {
+        setLoadError(true)
+        setResults([])
+      } else {
+        const needle = q.toLowerCase().trim()
+        setAreaOptions([...new Set((data as SearchBusiness[]).flatMap((business) => [business.city, business.address].filter(Boolean)))].slice(0, 20))
+        setResults(
+          (data as SearchBusiness[]).filter((business) => {
+            if (cat && !(business.business_type ?? '').toLowerCase().includes(cat.toLowerCase())) return false
+            if (area && !`${business.address} ${business.city}`.toLowerCase().includes(area.toLowerCase())) return false
+            if (price && business.price_range !== price) return false
+            if (openNow && !business.about.toLowerCase().includes('open')) return false
+            if (!needle) return true
+            const hay = [business.name, business.business_type, business.address, business.city, business.about, ...(business.specialties ?? [])].join(' ').toLowerCase()
+            return needle.split(/\s+/).every((word) => hay.includes(word))
+          }),
+        )
+      }
+      setLoading(false)
+    })()
+    return () => {
+      active = false
+    }
   }, [q, cat, area, price, openNow])
 
   const commit = (term: string) => {
@@ -59,7 +96,7 @@ export function SearchScreen() {
     <main className="@container mx-auto max-w-[1040px] pb-32 md:px-6 md:pb-12">
       <header className="sticky top-0 z-20 bg-bg/90 px-4 pb-2 pt-[max(12px,env(safe-area-inset-top))] backdrop-blur-xl md:px-0 md:pt-8">
         <h1 className="mb-3 flex items-center gap-2 text-title">
-          Search <PhaseTag phase="MVP" />
+          Search
         </h1>
         <div className="flex items-center gap-2">
           <form
@@ -74,16 +111,15 @@ export function SearchScreen() {
             <SearchIcon size={20} className="shrink-0 text-link" />
             <input
               ref={inputRef}
-              key={q}
-              defaultValue={q}
-              onChange={(e) => set('q', e.target.value)}
+              value={text}
+              onChange={(e) => { setText(e.target.value); set('q', e.target.value) }}
               placeholder="Kainan, pasyalan, o lugar"
               aria-label="Hanapin"
               enterKeyHint="search"
               className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-fg outline-none placeholder:text-fg-2"
             />
-            {q && (
-              <button type="button" aria-label="Burahin" onClick={() => set('q', null)} className="flex h-8 w-8 items-center justify-center rounded-full bg-sunken text-fg-2 dark:bg-surface">
+            {text && (
+              <button type="button" aria-label="Burahin" onClick={() => { setText(''); set('q', null) }} className="flex h-8 w-8 items-center justify-center rounded-full bg-sunken text-fg-2 dark:bg-surface">
                 <X size={16} />
               </button>
             )}
@@ -137,20 +173,6 @@ export function SearchScreen() {
             </ul>
           </section>
           <section>
-            <h2 className="mb-2 text-h3">Trending ngayon</h2>
-            <div className="grid gap-2 @xl:grid-cols-2">
-              {trendingSearches.map((t, i) => (
-                <button key={t.q} onClick={() => commit(t.q)} className="card flex h-14 items-center gap-3 px-4 text-left">
-                  <span className="font-display text-[18px] font-bold text-link">{i + 1}</span>
-                  <span className="flex-1 font-display text-[15px] font-medium">{t.q}</span>
-                  <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-ok">
-                    <TrendingUp size={14} /> {t.delta}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </section>
-          <section>
             <h2 className="mb-3 text-h3">Mga kategorya</h2>
             <div className="grid grid-cols-4 gap-2 @2xl:grid-cols-8">
               {categories.map((c) => (
@@ -159,19 +181,23 @@ export function SearchScreen() {
             </div>
           </section>
         </div>
+      ) : loading ? (
+        <p className="px-4 pt-8 text-body text-fg-2 md:px-0">Kinukuha ang mga negosyo mula sa database…</p>
+      ) : loadError ? (
+        <StateView expression="unsure" title="Hindi ma-load ang search" body="Hindi ma-access ang database. Subukan ulit mamaya." />
       ) : results.length ? (
         <section className="px-4 pt-3 md:px-0">
           <p className="mb-3 text-caption text-fg-2" aria-live="polite">
             {results.length} resulta · lahat ay verified
           </p>
           <div className="grid gap-2.5 @xl:hidden">
-            {results.map((p) => (
-              <ListingCard key={p.id} place={p} layout="row" />
+            {results.map((business) => (
+              <BusinessResult key={business.id} business={business} />
             ))}
           </div>
           <div className="hidden gap-3 @xl:grid @xl:grid-cols-2 @3xl:grid-cols-3">
-            {results.map((p) => (
-              <ListingCard key={p.id} place={p} />
+            {results.map((business) => (
+              <BusinessResult key={business.id} business={business} />
             ))}
           </div>
         </section>
@@ -204,9 +230,22 @@ export function SearchScreen() {
           ))}
         </div>
       </Sheet>
-      <OptionSheet open={sheet === 'area'} title="Lugar" options={areas} value={area} onPick={(v) => (setArea(v), setSheet(null))} onClose={() => setSheet(null)} />
+      <OptionSheet open={sheet === 'area'} title="Lugar" options={areaOptions} value={area} onPick={(v) => (setArea(v), setSheet(null))} onClose={() => setSheet(null)} />
       <OptionSheet open={sheet === 'price'} title="Presyo" options={[...prices]} value={price} onPick={(v) => (setPrice(v), setSheet(null))} onClose={() => setSheet(null)} />
     </main>
+  )
+}
+
+function BusinessResult({ business }: { business: SearchBusiness }) {
+  return (
+    <article className="card p-4">
+      <h3 className="text-h3">{business.name}</h3>
+      <p className="mt-1 text-caption text-fg-2">
+        {business.business_type || 'Negosyo'} · {business.price_range || 'Presyo unavailable'}
+      </p>
+      <p className="mt-2 text-body text-fg-2">{business.address || business.city || 'Address unavailable'}</p>
+      {business.specialties.length > 0 && <p className="mt-1 text-caption text-fg-2">{business.specialties.join(' · ')}</p>}
+    </article>
   )
 }
 

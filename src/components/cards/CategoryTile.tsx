@@ -1,6 +1,7 @@
 import { Coffee, Flame, Gift, Landmark, Sailboat, TreePalm, Utensils, Wallet, type LucideIcon } from 'lucide-react'
 import { motion } from 'motion/react'
 import type { Category } from '@/data/places'
+import { useLang } from '@/app/i18n'
 
 export const categoryMeta: Record<Category, { icon: LucideIcon; bg: string; fg: string }> = {
   Kainan: { icon: Utensils, bg: '#FF6A00', fg: '#2B130A' },
@@ -18,6 +19,17 @@ export const categories = Object.keys(categoryMeta) as Category[]
 export function CategoryTile({ category, onClick }: { category: Category; onClick?: () => void }) {
   const m = categoryMeta[category]
   const Icon = m.icon
+  const { t } = useLang()
+  const labels: Record<Category, [string, string]> = {
+    Kainan: ['Kainan', 'Dining'],
+    Pasyalan: ['Pasyalan', 'Places'],
+    'Budget Meals': ['Mga murang pagkain', 'Budget meals'],
+    Kapihan: ['Kapihan', 'Cafes'],
+    'Street Food': ['Pagkaing kalye', 'Street food'],
+    Resorts: ['Mga resort', 'Resorts'],
+    Tours: ['Mga paglilibot', 'Tours'],
+    Pasalubong: ['Pasalubong', 'Souvenirs'],
+  }
   return (
     <motion.button whileTap={{ scale: 0.94 }} onClick={onClick} className="flex min-w-0 flex-col items-center gap-1.5 rounded-2xl py-1">
       <span
@@ -26,7 +38,7 @@ export function CategoryTile({ category, onClick }: { category: Category; onClic
       >
         <Icon size={28} strokeWidth={1.75} />
       </span>
-      <span className="w-full truncate text-center font-display text-[12.5px] font-medium leading-tight text-fg">{category}</span>
+      <span className="w-full truncate text-center font-display text-[12.5px] font-medium leading-tight text-fg">{t(...labels[category])}</span>
     </motion.button>
   )
 }

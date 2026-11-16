@@ -1,4 +1,4 @@
-import { Camera, Check, MapPin, RefreshCcw, SwitchCamera, Zap, ZapOff } from 'lucide-react'
+import { Camera, Check, RefreshCcw, SlidersHorizontal, SwitchCamera, Zap, ZapOff } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
@@ -11,23 +11,33 @@ import { Button } from '@/components/ui/Button'
 import { PhaseTag } from '@/components/ui/PhaseTag'
 import { Segmented } from '@/components/ui/Segmented'
 import { Toggle } from '@/components/ui/Toggle'
-import { sampleMoments, type Moment } from '@/data/moments'
+import type { Moment } from '@/data/moments'
 import { cn } from '@/lib/cn'
+import { supabase } from '@/lib/supabase'
 import { getForcedState } from '@/lib/forced'
 import { shortDate } from '@/lib/format'
 import { useCamera } from './useCamera'
 
 const SAMPLE = 'https://images.unsplash.com/photo-1613892214268-9754501a3542?auto=format&fit=crop&w=900&h=900&q=70'
+const CAMERA_FILTERS = [
+  { id: 'none', label: 'Original', css: 'none' },
+  { id: 'warm', label: 'Warm', css: 'sepia(0.18) saturate(1.25) contrast(1.05)' },
+  { id: 'mono', label: 'B&W', css: 'grayscale(1) contrast(1.08)' },
+  { id: 'fade', label: 'Fade', css: 'saturate(0.7) contrast(0.9) brightness(1.08)' },
+  { id: 'vivid', label: 'Vivid', css: 'saturate(1.55) contrast(1.12)' },
+] as const
+type CameraFilter = (typeof CAMERA_FILTERS)[number]['id']
 
 export function MomentsCamera() {
   const forced = getForcedState()
   const cam = useCamera()
   const navigate = useNavigate()
-  const { myMoments, cameraTipSeen, setCameraTipSeen } = useStore()
+  const { myMoments, cameraTipSeen, setCameraTipSeen, showToast } = useStore()
   const [shot, setShot] = useState<string | null>(forced === 'captured' ? SAMPLE : null)
   const [flash, setFlash] = useState(false)
+  const [cameraFilter, setCameraFilter] = useState<CameraFilter>('none')
   const [showTip, setShowTip] = useState(forced === 'tip' || (!cameraTipSeen && !forced))
-  const lastPhoto = myMoments[0]?.src ?? sampleMoments.find((m) => m.mine)?.src
+  const lastPhoto = myMoments[0]?.src
 
   useEffect(() => {
     if (forced === 'sample' || forced === 'captured' || forced === 'tip') {
@@ -45,13 +55,19 @@ export function MomentsCamera() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const shutter = () => {
+  const shutter = async () => {
     if (cam.torch && !cam.torchSupported) {
       setFlash(true)
       setTimeout(() => setFlash(false), 180)
     }
-    const data = cam.status === 'live' ? cam.capture() : SAMPLE
-    setShot(data ?? SAMPLE)
+    const filter = CAMERA_FILTERS.find((item) => item.id === cameraFilter)?.css ?? 'none'
+    try {
+      const data = cam.status === 'live' ? cam.capture(filter) : await applyImageFilter(SAMPLE, filter)
+      setShot(data ?? SAMPLE)
+    } catch (error) {
+      showToast({ text: error instanceof Error ? error.message : 'Hindi ma-apply ang camera filter.', expression: 'unsure' })
+      setShot(SAMPLE)
+    }
   }
 
   const needsPermission = cam.status === 'idle' || cam.status === 'requesting' || cam.status === 'denied' || cam.status === 'unavailable'
@@ -98,8 +114,8 @@ export function MomentsCamera() {
           <div className="absolute inset-0 flex items-center justify-center pb-[170px] pt-16 md:pb-[130px]">
             <div className="relative w-[min(82vw,calc(100dvh-340px),440px)] bg-[#FFFDF8] p-[5%] pb-[22%] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.8)]">
               <div className="relative aspect-square overflow-hidden bg-black">
-                <video ref={cam.videoRef} playsInline muted className={cn('h-full w-full object-cover', cam.facing === 'user' && '-scale-x-100', cam.status !== 'live' && 'hidden')} />
-                {cam.status === 'sample' && <img src={SAMPLE} alt="Sample na viewfinder" className="kenburns h-full w-full object-cover" />}
+                <video ref={cam.videoRef} playsInline muted style={{ filter: CAMERA_FILTERS.find((item) => item.id === cameraFilter)?.css }} className={cn('h-full w-full object-cover', cam.facing === 'user' && '-scale-x-100', cam.status !== 'live' && 'hidden')} />
+                {cam.status === 'sample' && <img src={SAMPLE} alt="Sample na viewfinder" style={{ filter: CAMERA_FILTERS.find((item) => item.id === cameraFilter)?.css }} className="kenburns h-full w-full object-cover" />}
                 {/* framing guides */}
                 <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3" aria-hidden>
                   {Array.from({ length: 9 }).map((_, i) => (
@@ -107,15 +123,28 @@ export function MomentsCamera() {
                   ))}
                 </div>
               </div>
-              <p className="absolute inset-x-0 bottom-[6%] text-center font-hand text-[22px] text-[#3A1A0E]/60">{shortDate(new Date())} · Intramuros</p>
+              <p className="absolute inset-x-0 bottom-[6%] text-center font-hand text-[22px] text-[#3A1A0E]/60">{shortDate(new Date())}</p>
             </div>
           </div>
-          <div className="absolute left-1/2 top-[76px] -translate-x-1/2">
-            <span className="glass-dark inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[13px] font-semibold">
-              <MapPin size={14} /> Malapit sa Intramuros
-            </span>
+          <div className="absolute inset-x-0 bottom-[178px] z-20 flex justify-center md:bottom-[116px]">
+            <div className="glass-dark flex max-w-[calc(100%-24px)] items-center gap-1.5 overflow-x-auto rounded-full p-1.5" aria-label="Mga camera filter">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center text-white/70" aria-hidden>
+                <SlidersHorizontal size={15} />
+              </span>
+              {CAMERA_FILTERS.map((filter) => (
+                <button
+                  key={filter.id}
+                  type="button"
+                  aria-label={`Filter: ${filter.label}`}
+                  aria-pressed={cameraFilter === filter.id}
+                  onClick={() => setCameraFilter(filter.id)}
+                  className={cn('shrink-0 rounded-full px-3 py-1.5 text-[12px] font-semibold transition-colors', cameraFilter === filter.id ? 'bg-primary text-ink' : 'text-white/80 hover:bg-white/10')}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
           </div>
-
           {/* controls */}
           <div className="absolute inset-x-0 bottom-[96px] z-20 flex items-center justify-around px-8 md:bottom-8">
             <button onClick={() => navigate('/moments/map?gallery=half&f=mine')} aria-label="Buksan ang gallery" className="h-14 w-14 overflow-hidden rounded-[14px] border-2 border-white/80 bg-white/10">
@@ -159,6 +188,25 @@ export function MomentsCamera() {
   )
 }
 
+async function applyImageFilter(src: string, filter: string): Promise<string> {
+  if (filter === 'none') return src
+  const image = new Image()
+  image.crossOrigin = 'anonymous'
+  image.src = src
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve()
+    image.onerror = () => reject(new Error('Hindi ma-load ang sample image para sa filter.'))
+  })
+  const canvas = document.createElement('canvas')
+  canvas.width = 900
+  canvas.height = 900
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Hindi ma-apply ang camera filter.')
+  context.filter = filter
+  context.drawImage(image, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/jpeg', 0.9)
+}
+
 function CaptureResult({ src, onRetake }: { src: string; onRetake: () => void }) {
   const tilt = useMemo(() => (Math.random() < 0.5 ? -1 : 1) * (2 + Math.random() * 2), [])
   const [caption, setCaption] = useState('')
@@ -168,14 +216,52 @@ function CaptureResult({ src, onRetake }: { src: string; onRetake: () => void })
   const navigate = useNavigate()
   const today = new Date().toISOString().slice(0, 10)
 
-  const save = () => {
+  const save = async () => {
+    const { data: userData } = await supabase.auth.getUser()
+    if (!userData.user) {
+      showToast({ text: 'Mag-sign in muna para ma-save ang Moment sa database.', expression: 'unsure' })
+      return
+    }
+    const location = await new Promise<{ latitude: number; longitude: number } | null>((resolve) => {
+      navigator.geolocation?.getCurrentPosition(({ coords }) => resolve({ latitude: coords.latitude, longitude: coords.longitude }), () => resolve(null), { enableHighAccuracy: false, timeout: 10000 })
+    })
+    if (!location) {
+      showToast({ text: 'Kailangan ang location para mailagay ang Moment sa mapa.', expression: 'unsure' })
+      return
+    }
+    const blob = await fetch(src).then((response) => response.blob())
+    const path = `${userData.user.id}/${Date.now()}.jpg`
+    const upload = await supabase.storage.from('images').upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: false })
+    if (upload.error) {
+      showToast({ text: `Hindi na-upload ang larawan: ${upload.error.message}`, expression: 'unsure' })
+      return
+    }
+    const { error } = await supabase.from('moments').insert({
+      author_id: userData.user.id,
+      storage_path: path,
+      caption: caption || 'Moment',
+      visited_at: today,
+      place_name: '',
+      area: '',
+      latitude: location.latitude,
+      longitude: location.longitude,
+      kind: 'Pasyalan',
+      frame: 'classic',
+      tilt: Math.round(tilt),
+      on_map: onMap,
+    })
+    if (error) {
+      await supabase.storage.from('images').remove([path])
+      showToast({ text: `Hindi na-save ang Moment: ${error.message}`, expression: 'unsure' })
+      return
+    }
     const m: Moment = {
       id: `me-${Date.now()}`,
       src,
-      caption: caption || 'Moment sa Intramuros',
+      caption: caption || 'Moment ko',
       date: today,
-      place: 'Intramuros',
-      area: 'Intramuros',
+      place: '',
+      area: '',
       map: { x: 585 + Math.random() * 40 - 20, y: 545 + Math.random() * 40 - 20 },
       kind: 'Pasyalan',
       mine: true,
@@ -208,7 +294,7 @@ function CaptureResult({ src, onRetake }: { src: string; onRetake: () => void })
           {!saved ? (
             <motion.div key="form" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.2 }} className="w-full space-y-3">
               <label className="block rounded-[18px] bg-[#FFFDF8] px-4 py-2 text-[#3A1A0E]">
-                <span className="font-display text-[11px] font-semibold uppercase tracking-wide text-[#6B3A22]">{shortDate(today)} · Intramuros</span>
+                <span className="font-display text-[11px] font-semibold uppercase tracking-wide text-[#6B3A22]">{shortDate(today)}</span>
                 <input
                   value={caption}
                   onChange={(e) => setCaption(e.target.value)}
@@ -217,12 +303,7 @@ function CaptureResult({ src, onRetake }: { src: string; onRetake: () => void })
                   aria-label="Caption"
                 />
               </label>
-              <div className="flex items-center justify-between gap-3 rounded-[18px] bg-white/10 px-4 py-1.5">
-                <span className="inline-flex items-center gap-2 text-[15px] font-semibold">
-                  <span className="inline-flex h-8 items-center gap-1 rounded-full bg-primary px-2.5 text-[13px] text-ink">
-                    <MapPin size={14} /> Malapit sa Intramuros
-                  </span>
-                </span>
+              <div className="flex items-center justify-end gap-3 rounded-[18px] bg-white/10 px-4 py-1.5">
                 <span className="flex items-center gap-1 text-[14px]">
                   Idagdag sa mapa <Toggle label="Idagdag sa mapa" checked={onMap} onChange={setOnMap} />
                 </span>

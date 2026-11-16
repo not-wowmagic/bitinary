@@ -1,10 +1,29 @@
 
 create extension if not exists pgcrypto;
 
-create type public.account_role as enum ('traveler', 'business');
-create type public.business_verification_status as enum ('none', 'pending', 'verified', 'needs-docs');
-create type public.post_status as enum ('draft', 'scheduled', 'published');
-create type public.review_case_status as enum ('received', 'review', 'info', 'removed', 'kept', 'appealed');
+do $$ begin
+  create type public.account_role as enum ('traveler', 'business');
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create type public.business_verification_status as enum ('none', 'pending', 'verified', 'needs-docs');
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create type public.post_status as enum ('draft', 'scheduled', 'published');
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create type public.review_case_status as enum ('received', 'review', 'info', 'removed', 'kept', 'appealed');
+exception
+  when duplicate_object then null;
+end $$;
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -16,7 +35,7 @@ begin
 end;
 $$;
 
-create table public.profiles (
+create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   role public.account_role not null default 'traveler',
   name text not null default '',
@@ -33,7 +52,118 @@ create table public.profiles (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
-create table public.traveler_preferences (
+create table if not exists public.dev_console_admins (
+  email text primary key check (email = lower(btrim(email))),
+  created_at timestamptz not null default timezone('utc', now())
+);
+
+delete from public.dev_console_admins where email = 'dev@bitinary.ph';
+
+create table if not exists public.dev_console_state (
+  id smallint primary key default 1 check (id = 1),
+  data jsonb not null default '{}'::jsonb,
+  updated_by uuid references auth.users(id) on delete set null,
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+insert into public.dev_console_state (id) values (1)
+on conflict (id) do nothing;
+
+create or replace function public.is_dev_console_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1 from public.dev_console_admins
+    where email = lower(auth.jwt() ->> 'email')
+  );
+$$;
+
+create or replace function public.prevent_profile_role_escalation()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if new.role is distinct from old.role and not public.is_dev_console_admin() then
+    raise exception 'Only a developer can change account roles.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_prevent_role_escalation on public.profiles;
+create trigger profiles_prevent_role_escalation
+before update of role on public.profiles
+for each row execute function public.prevent_profile_role_escalation();
+
+create or replace function public.get_public_dev_console_settings()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select jsonb_strip_nulls(jsonb_build_object(
+    'banners', coalesce((
+      select jsonb_agg(banner)
+      from jsonb_array_elements(coalesce(data -> 'banners', '[]'::jsonb)) as banner
+      where banner ->> 'status' = 'live'
+    ), '[]'::jsonb),
+    'theme', data -> 'theme',
+    'flags', data -> 'flags',
+    'announcement', data -> 'announcement',
+    'maintenance', data -> 'maintenance',
+    'hiddenPlaces', data -> 'hiddenPlaces',
+    'featuredPlaces', data -> 'featuredPlaces'
+  ))
+  from public.dev_console_state
+  where id = 1;
+$$;
+
+create or replace function public.track_dev_console_banner_event(banner_id text, event_type text)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if event_type not in ('views', 'clicks') then
+    raise exception 'Unsupported banner event type';
+  end if;
+
+  update public.dev_console_state
+  set data = jsonb_set(
+    data,
+    '{banners}',
+    coalesce((
+      select jsonb_agg(
+        case
+          when banner ->> 'id' = banner_id and banner ->> 'status' = 'live' then
+            jsonb_set(
+              banner,
+              array['stats', event_type],
+              to_jsonb(coalesce((banner #>> array['stats', event_type])::integer, 0) + 1),
+              true
+            )
+          else banner
+        end
+        order by ordinal
+      )
+      from jsonb_array_elements(coalesce(data -> 'banners', '[]'::jsonb)) with ordinality as item(banner, ordinal)
+    ), '[]'::jsonb),
+    true
+  ),
+  updated_at = timezone('utc', now())
+  where id = 1;
+end;
+$$;
+
+create table if not exists public.traveler_preferences (
   user_id uuid primary key references public.profiles(id) on delete cascade,
   last_trip text,
   last_trip_at timestamptz,
@@ -55,7 +185,7 @@ create table public.traveler_preferences (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
-create table public.businesses (
+create table if not exists public.businesses (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null references public.profiles(id) on delete cascade,
   name text not null,
@@ -79,12 +209,19 @@ create table public.businesses (
   verification_status public.business_verification_status not null default 'none',
   verification_method text check (verification_method in ('upload', 'onsite')),
   verification_files text[] not null default '{}',
+  verification_data jsonb not null default '{}'::jsonb,
   onsite_date date,
+  setup_status jsonb not null default '{}'::jsonb,
+  views integer not null default 0 check (views >= 0),
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
+alter table public.businesses add column if not exists verification_data jsonb not null default '{}'::jsonb;
 
-create table public.business_hours (
+alter table public.businesses
+  add column if not exists setup_status jsonb not null default '{}'::jsonb;
+
+create table if not exists public.business_hours (
   business_id uuid not null references public.businesses(id) on delete cascade,
   day_of_week smallint not null check (day_of_week between 0 and 6),
   opens_at time,
@@ -94,7 +231,7 @@ create table public.business_hours (
   primary key (business_id, day_of_week)
 );
 
-create table public.menu_items (
+create table if not exists public.menu_items (
   id uuid primary key default gen_random_uuid(),
   business_id uuid not null references public.businesses(id) on delete cascade,
   name text not null,
@@ -103,7 +240,7 @@ create table public.menu_items (
   sort_order integer not null default 0
 );
 
-create table public.business_photos (
+create table if not exists public.business_photos (
   id uuid primary key default gen_random_uuid(),
   business_id uuid not null references public.businesses(id) on delete cascade,
   storage_path text not null,
@@ -111,7 +248,7 @@ create table public.business_photos (
   sort_order integer not null default 0
 );
 
-create table public.branches (
+create table if not exists public.branches (
   id uuid primary key default gen_random_uuid(),
   business_id uuid not null references public.businesses(id) on delete cascade,
   name text not null,
@@ -119,7 +256,7 @@ create table public.branches (
   created_at timestamptz not null default timezone('utc', now())
 );
 
-create table public.business_staff (
+create table if not exists public.business_staff (
   business_id uuid not null references public.businesses(id) on delete cascade,
   user_id uuid references public.profiles(id) on delete cascade,
   email text not null,
@@ -130,7 +267,7 @@ create table public.business_staff (
   primary key (business_id, email)
 );
 
-create table public.posts (
+create table if not exists public.posts (
   id uuid primary key default gen_random_uuid(),
   business_id uuid not null references public.businesses(id) on delete cascade,
   post_type text not null check (post_type in ('post', 'reel', 'blog')),
@@ -149,7 +286,7 @@ create table public.posts (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
-create table public.comments (
+create table if not exists public.comments (
   id uuid primary key default gen_random_uuid(),
   post_id uuid not null references public.posts(id) on delete cascade,
   author_id uuid references public.profiles(id) on delete set null,
@@ -161,7 +298,7 @@ create table public.comments (
   created_at timestamptz not null default timezone('utc', now())
 );
 
-create table public.reviews (
+create table if not exists public.reviews (
   id uuid primary key default gen_random_uuid(),
   business_id uuid not null references public.businesses(id) on delete cascade,
   author_id uuid references public.profiles(id) on delete set null,
@@ -172,10 +309,107 @@ create table public.reviews (
   checkin_at timestamptz,
   checkin_via text check (checkin_via in ('QR', 'code')),
   reply text,
+  hidden boolean not null default false,
   created_at timestamptz not null default timezone('utc', now())
 );
+alter table public.reviews add column if not exists hidden boolean not null default false;
 
-create table public.review_cases (
+create or replace function public.prevent_review_visibility_escalation()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if new.hidden is distinct from old.hidden and not public.is_dev_console_admin() then
+    raise exception 'Only a developer can change review visibility.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists reviews_prevent_visibility_escalation on public.reviews;
+create trigger reviews_prevent_visibility_escalation
+before update of hidden on public.reviews
+for each row execute function public.prevent_review_visibility_escalation();
+
+create or replace function public.get_dev_console_users()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if not public.is_dev_console_admin() then
+    raise exception 'Developer access required.';
+  end if;
+
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', u.id,
+      'name', coalesce(nullif(p.name, ''), nullif(p.nickname, ''), u.email, 'Unnamed user'),
+      'email', u.email,
+      'mobile', p.mobile,
+      'role', coalesce(p.role, 'traveler'::public.account_role),
+      'method', case
+        when u.raw_app_meta_data ->> 'provider' = 'google' then 'google'
+        when p.mobile is not null and p.mobile <> '' then 'mobile'
+        else 'email'
+      end,
+      'city', p.city,
+      'joined', u.created_at,
+      'lastActive', u.last_sign_in_at,
+      'reviews', (select count(*) from public.reviews r where r.author_id = u.id),
+      'comments', (select count(*) from public.comments c where c.author_id = u.id)
+    ) order by u.created_at desc)
+    from auth.users u
+    left join public.profiles p on p.id = u.id
+  ), '[]'::jsonb);
+end;
+$$;
+
+create or replace function public.set_dev_console_user_role(p_user_id uuid, p_role public.account_role)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if not public.is_dev_console_admin() then
+    raise exception 'Developer access required.';
+  end if;
+  update public.profiles set role = p_role where id = p_user_id;
+  if not found then
+    raise exception 'User profile was not found.';
+  end if;
+end;
+$$;
+
+create or replace function public.set_dev_console_content_hidden(p_item_id uuid, p_kind text, p_hidden boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if not public.is_dev_console_admin() then
+    raise exception 'Developer access required.';
+  end if;
+  if p_kind = 'review' then
+    update public.reviews set hidden = p_hidden where id = p_item_id;
+  elsif p_kind = 'comment' then
+    update public.comments set hidden = p_hidden where id = p_item_id;
+  else
+    raise exception 'Unsupported moderation item kind.';
+  end if;
+  if not found then
+    raise exception 'Moderation item was not found.';
+  end if;
+end;
+$$;
+
+create table if not exists public.review_cases (
   id uuid primary key default gen_random_uuid(),
   review_id uuid not null references public.reviews(id) on delete cascade,
   reason text not null,
@@ -188,7 +422,7 @@ create table public.review_cases (
   decided_at timestamptz
 );
 
-create table public.deals (
+create table if not exists public.deals (
   id uuid primary key default gen_random_uuid(),
   business_id uuid not null references public.businesses(id) on delete cascade,
   kind text not null check (kind in ('b1t1', 'discount', 'addon')),
@@ -208,7 +442,7 @@ create table public.deals (
   views integer not null default 0 check (views >= 0)
 );
 
-create table public.boosts (
+create table if not exists public.boosts (
   id uuid primary key default gen_random_uuid(),
   business_id uuid not null references public.businesses(id) on delete cascade,
   post_id uuid not null references public.posts(id) on delete cascade,
@@ -222,14 +456,25 @@ create table public.boosts (
   saves integer not null default 0
 );
 
-create table public.saved_places (
+create table if not exists public.saved_places (
   user_id uuid not null references public.profiles(id) on delete cascade,
   business_id uuid not null references public.businesses(id) on delete cascade,
   created_at timestamptz not null default timezone('utc', now()),
   primary key (user_id, business_id)
 );
 
-create table public.itineraries (
+create table if not exists public.business_daily_stats (
+  business_id uuid not null references public.businesses(id) on delete cascade,
+  stat_date date not null default current_date,
+  views integer not null default 0 check (views >= 0),
+  saves integer not null default 0 check (saves >= 0),
+  trip_adds integer not null default 0 check (trip_adds >= 0),
+  checkins integer not null default 0 check (checkins >= 0),
+  deal_customers integer not null default 0 check (deal_customers >= 0),
+  primary key (business_id, stat_date)
+);
+
+create table if not exists public.itineraries (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   title text not null,
@@ -242,7 +487,7 @@ create table public.itineraries (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
-create table public.itinerary_stops (
+create table if not exists public.itinerary_stops (
   id uuid primary key default gen_random_uuid(),
   itinerary_id uuid not null references public.itineraries(id) on delete cascade,
   business_id uuid references public.businesses(id) on delete set null,
@@ -254,7 +499,7 @@ create table public.itinerary_stops (
   sort_order integer not null default 0
 );
 
-create table public.moments (
+create table if not exists public.moments (
   id uuid primary key default gen_random_uuid(),
   author_id uuid not null references public.profiles(id) on delete cascade,
   storage_path text not null,
@@ -272,7 +517,7 @@ create table public.moments (
   created_at timestamptz not null default timezone('utc', now())
 );
 
-create table public.reservation_requests (
+create table if not exists public.reservation_requests (
   id uuid primary key default gen_random_uuid(),
   business_id uuid not null references public.businesses(id) on delete cascade,
   requester_id uuid references public.profiles(id) on delete set null,
@@ -283,7 +528,7 @@ create table public.reservation_requests (
   note text
 );
 
-create table public.notifications (
+create table if not exists public.notifications (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   kind text not null,
@@ -294,22 +539,103 @@ create table public.notifications (
   created_at timestamptz not null default timezone('utc', now())
 );
 
-create index posts_business_published_idx on public.posts (business_id, published_at desc);
-create index reviews_business_created_idx on public.reviews (business_id, created_at desc);
-create index comments_post_created_idx on public.comments (post_id, created_at);
-create index moments_author_created_idx on public.moments (author_id, created_at desc);
-create index notifications_user_created_idx on public.notifications (user_id, created_at desc);
+create or replace function public.set_dev_console_business_verification(
+  p_business_id uuid,
+  p_verification jsonb,
+  p_notification jsonb default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_owner_id uuid;
+  v_status public.business_verification_status;
+begin
+  if not public.is_dev_console_admin() then
+    raise exception 'Developer access required.';
+  end if;
 
+  v_status := case p_verification ->> 'status'
+    when 'pending' then 'pending'::public.business_verification_status
+    when 'verified' then 'verified'::public.business_verification_status
+    when 'needs-docs' then 'needs-docs'::public.business_verification_status
+    when 'rejected' then 'needs-docs'::public.business_verification_status
+    else 'none'::public.business_verification_status
+  end;
+
+  update public.businesses
+  set verification_status =   v_status,
+      verification_method = nullif(p_verification ->> 'method', ''),
+      verification_files = coalesce(array(
+        select jsonb_array_elements_text(coalesce(p_verification -> 'files', '[]'::jsonb))
+      ), '{}'::text[]),
+      onsite_date = nullif(p_verification ->> 'onsiteDate', '')::date,
+      verification_data = p_verification
+  where id = p_business_id
+  returning owner_id into v_owner_id;
+
+  if not found then
+    raise exception 'Business was not found.';
+  end if;
+
+  if p_notification is not null then
+    insert into public.notifications (user_id, kind, title, body, target)
+    values (
+      v_owner_id,
+      'verification',
+      'Business verification update',
+      concat_ws(E'\n', nullif(p_notification ->> 'en', ''), nullif(p_notification ->> 'tl', '')),
+      '/biz/stats/backgrounds#verify'
+    );
+  end if;
+end;
+$$;
+
+create table if not exists public.jimbot_conversations (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists public.jimbot_messages (
+  id uuid primary key default gen_random_uuid(),
+  conversation_id uuid not null references public.jimbot_conversations(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  role text not null check (role in ('user', 'bot')),
+  intent text,
+  content text not null,
+  created_at timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists posts_business_published_idx on public.posts (business_id, published_at desc);
+create index if not exists reviews_business_created_idx on public.reviews (business_id, created_at desc);
+create index if not exists reviews_author_idx on public.reviews (author_id);
+create index if not exists comments_post_created_idx on public.comments (post_id, created_at);
+create index if not exists comments_author_idx on public.comments (author_id);
+create index if not exists moments_author_created_idx on public.moments (author_id, created_at desc);
+create index if not exists notifications_user_created_idx on public.notifications (user_id, created_at desc);
+create index if not exists jimbot_conversations_user_updated_idx on public.jimbot_conversations (user_id, updated_at desc);
+create index if not exists jimbot_messages_conversation_created_idx on public.jimbot_messages (conversation_id, created_at);
+
+drop trigger if exists profiles_updated_at on public.profiles;
 create trigger profiles_updated_at before update on public.profiles
 for each row execute function public.set_updated_at();
+drop trigger if exists businesses_updated_at on public.businesses;
 create trigger businesses_updated_at before update on public.businesses
 for each row execute function public.set_updated_at();
+drop trigger if exists posts_updated_at on public.posts;
 create trigger posts_updated_at before update on public.posts
 for each row execute function public.set_updated_at();
+drop trigger if exists itineraries_updated_at on public.itineraries;
 create trigger itineraries_updated_at before update on public.itineraries
 for each row execute function public.set_updated_at();
 
 alter table public.profiles enable row level security;
+alter table public.dev_console_admins enable row level security;
+alter table public.dev_console_state enable row level security;
 alter table public.traveler_preferences enable row level security;
 alter table public.businesses enable row level security;
 alter table public.business_hours enable row level security;
@@ -324,18 +650,147 @@ alter table public.review_cases enable row level security;
 alter table public.deals enable row level security;
 alter table public.boosts enable row level security;
 alter table public.saved_places enable row level security;
+alter table public.business_daily_stats enable row level security;
 alter table public.itineraries enable row level security;
 alter table public.itinerary_stops enable row level security;
 alter table public.moments enable row level security;
 alter table public.reservation_requests enable row level security;
 alter table public.notifications enable row level security;
+alter table public.jimbot_conversations enable row level security;
+alter table public.jimbot_messages enable row level security;
+
+revoke all on public.dev_console_admins from anon, authenticated;
+grant select, insert, delete on public.dev_console_admins to authenticated;
+drop policy if exists "Developers can view their own console allowlist entry" on public.dev_console_admins;
+create policy "Developers can view their own console allowlist entry" on public.dev_console_admins
+for select to authenticated using (
+  lower(email) = lower(auth.jwt() ->> 'email')
+);
+drop policy if exists "Developers can view console team access" on public.dev_console_admins;
+create policy "Developers can view console team access" on public.dev_console_admins
+for select to authenticated using (public.is_dev_console_admin());
+drop policy if exists "Developers manage console team access" on public.dev_console_admins;
+create policy "Developers manage console team access" on public.dev_console_admins
+for insert to authenticated with check (public.is_dev_console_admin());
+drop policy if exists "Developers remove console team access" on public.dev_console_admins;
+create policy "Developers remove console team access" on public.dev_console_admins
+for delete to authenticated using (public.is_dev_console_admin());
+
+revoke all on public.dev_console_state from anon, authenticated;
+grant select, insert, update on public.dev_console_state to authenticated;
+drop policy if exists "Developers manage console state" on public.dev_console_state;
+create policy "Developers manage console state" on public.dev_console_state
+for all to authenticated
+using (public.is_dev_console_admin())
+with check (public.is_dev_console_admin());
+
+revoke all on function public.is_dev_console_admin() from public, anon;
+grant execute on function public.is_dev_console_admin() to authenticated;
+revoke all on function public.get_dev_console_users() from public, anon;
+grant execute on function public.get_dev_console_users() to authenticated;
+revoke all on function public.set_dev_console_user_role(uuid, public.account_role) from public, anon;
+grant execute on function public.set_dev_console_user_role(uuid, public.account_role) to authenticated;
+revoke all on function public.set_dev_console_content_hidden(uuid, text, boolean) from public, anon;
+grant execute on function public.set_dev_console_content_hidden(uuid, text, boolean) to authenticated;
+revoke all on function public.set_dev_console_business_verification(uuid, jsonb, jsonb) from public, anon;
+grant execute on function public.set_dev_console_business_verification(uuid, jsonb, jsonb) to authenticated;
+revoke all on function public.get_public_dev_console_settings() from public;
+grant execute on function public.get_public_dev_console_settings() to anon, authenticated;
+revoke all on function public.track_dev_console_banner_event(text, text) from public;
+grant execute on function public.track_dev_console_banner_event(text, text) to anon, authenticated;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'dev_console_state'
+  ) then
+    alter publication supabase_realtime add table public.dev_console_state;
+  end if;
+end $$;
+
+do $$
+declare
+  policy_name text;
+  policy_table text;
+  policy_pair text[];
+begin
+  foreach policy_pair slice 1 in array array[
+    ['Users manage their profile', 'public.profiles'],
+    ['Developers view user profiles', 'public.profiles'],
+    ['Users manage their preferences', 'public.traveler_preferences'],
+    ['Users manage saved places', 'public.saved_places'],
+    ['Owners view saved places for their business', 'public.saved_places'],
+    ['Users manage itineraries', 'public.itineraries'],
+    ['Users manage itinerary stops', 'public.itinerary_stops'],
+    ['Users manage moments', 'public.moments'],
+    ['Users view notifications', 'public.notifications'],
+    ['Users update notifications', 'public.notifications'],
+    ['Users manage Jimbot conversations', 'public.jimbot_conversations'],
+    ['Users manage Jimbot messages', 'public.jimbot_messages'],
+    ['Public can view live businesses', 'public.businesses'],
+    ['Developers view businesses', 'public.businesses'],
+    ['Owners manage businesses', 'public.businesses'],
+    ['Public can view business hours', 'public.business_hours'],
+    ['Owners manage business hours', 'public.business_hours'],
+    ['Public can view menus', 'public.menu_items'],
+    ['Owners manage menus', 'public.menu_items'],
+    ['Public can view business photos', 'public.business_photos'],
+    ['Owners manage business photos', 'public.business_photos'],
+    ['Public can view branches', 'public.branches'],
+    ['Owners manage branches', 'public.branches'],
+    ['Owners manage business staff', 'public.business_staff'],
+    ['Public can view business content', 'public.posts'],
+    ['Developers view posts', 'public.posts'],
+    ['Owners manage posts', 'public.posts'],
+    ['Public can view reviews', 'public.reviews'],
+    ['Users create reviews', 'public.reviews'],
+    ['Authors update reviews', 'public.reviews'],
+    ['Owners manage review replies', 'public.reviews'],
+    ['Developers view all reviews', 'public.reviews'],
+    ['Developers moderate reviews', 'public.reviews'],
+    ['Users create comments', 'public.comments'],
+    ['Public can view visible comments', 'public.comments'],
+    ['Owners moderate comments', 'public.comments'],
+    ['Developers view all comments', 'public.comments'],
+    ['Developers moderate comments', 'public.comments'],
+    ['Owners manage review cases', 'public.review_cases'],
+    ['Public can view active deals', 'public.deals'],
+    ['Owners manage deals', 'public.deals'],
+    ['Owners manage boosts', 'public.boosts'],
+    ['Public can view business daily stats', 'public.business_daily_stats'],
+    ['Owners manage business daily stats', 'public.business_daily_stats'],
+    ['Users create reservations', 'public.reservation_requests'],
+    ['Users view their reservations', 'public.reservation_requests'],
+    ['Owners manage reservations', 'public.reservation_requests'],
+    ['Users upload their own images', 'storage.objects'],
+    ['Users view their own images', 'storage.objects'],
+    ['Users update their own images', 'storage.objects'],
+    ['Users delete their own images', 'storage.objects'],
+    ['Users upload their own videos', 'storage.objects'],
+    ['Users view their own videos', 'storage.objects'],
+    ['Users update their own videos', 'storage.objects'],
+    ['Users delete their own videos', 'storage.objects']
+  ]::text[][]
+  loop
+    policy_name := policy_pair[1];
+    policy_table := policy_pair[2];
+    execute format('drop policy if exists %I on %s', policy_name, policy_table);
+  end loop;
+end $$;
 
 create policy "Users manage their profile" on public.profiles
 for all using (id = auth.uid()) with check (id = auth.uid());
+create policy "Developers view user profiles" on public.profiles
+for select to authenticated using (public.is_dev_console_admin());
 create policy "Users manage their preferences" on public.traveler_preferences
 for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "Users manage saved places" on public.saved_places
 for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "Owners view saved places for their business" on public.saved_places
+for select using (exists (
+  select 1 from public.businesses b where b.id = business_id and b.owner_id = auth.uid()
+));
 create policy "Users manage itineraries" on public.itineraries
 for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "Users manage itinerary stops" on public.itinerary_stops
@@ -352,9 +807,20 @@ create policy "Users view notifications" on public.notifications
 for select using (user_id = auth.uid());
 create policy "Users update notifications" on public.notifications
 for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "Users manage Jimbot conversations" on public.jimbot_conversations
+for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "Users manage Jimbot messages" on public.jimbot_messages
+for all using (user_id = auth.uid()) with check (
+  user_id = auth.uid() and exists (
+    select 1 from public.jimbot_conversations c
+    where c.id = conversation_id and c.user_id = auth.uid()
+  )
+);
 
 create policy "Public can view live businesses" on public.businesses
 for select using (live = true or owner_id = auth.uid());
+create policy "Developers view businesses" on public.businesses
+for select to authenticated using (public.is_dev_console_admin());
 create policy "Owners manage businesses" on public.businesses
 for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
@@ -414,6 +880,8 @@ for select using (
   status = 'published'
   or exists (select 1 from public.businesses b where b.id = business_id and b.owner_id = auth.uid())
 );
+create policy "Developers view posts" on public.posts
+for select to authenticated using (public.is_dev_console_admin());
 create policy "Owners manage posts" on public.posts
 for all using (exists (
   select 1 from public.businesses b where b.id = business_id and b.owner_id = auth.uid()
@@ -422,7 +890,11 @@ for all using (exists (
 ));
 
 create policy "Public can view reviews" on public.reviews
-for select using (true);
+for select using (hidden = false);
+create policy "Developers view all reviews" on public.reviews
+for select to authenticated using (public.is_dev_console_admin());
+create policy "Developers moderate reviews" on public.reviews
+for update to authenticated using (public.is_dev_console_admin()) with check (public.is_dev_console_admin());
 create policy "Users create reviews" on public.reviews
 for insert with check (author_id = auth.uid());
 create policy "Authors update reviews" on public.reviews
@@ -436,7 +908,11 @@ for update using (exists (
 create policy "Users create comments" on public.comments
 for insert with check (author_id = auth.uid());
 create policy "Public can view visible comments" on public.comments
-for select using (hidden = false or author_id = auth.uid());
+for select using (hidden = false);
+create policy "Developers view all comments" on public.comments
+for select to authenticated using (public.is_dev_console_admin());
+create policy "Developers moderate comments" on public.comments
+for update to authenticated using (public.is_dev_console_admin()) with check (public.is_dev_console_admin());
 create policy "Owners moderate comments" on public.comments
 for update using (exists (
   select 1 from public.posts p
@@ -472,6 +948,14 @@ for all using (exists (
 )) with check (exists (
   select 1 from public.businesses b where b.id = business_id and b.owner_id = auth.uid()
 ));
+create policy "Public can view business daily stats" on public.business_daily_stats
+for select using (true);
+create policy "Owners manage business daily stats" on public.business_daily_stats
+for all using (exists (
+  select 1 from public.businesses b where b.id = business_id and b.owner_id = auth.uid()
+)) with check (exists (
+  select 1 from public.businesses b where b.id = business_id and b.owner_id = auth.uid()
+));
 create policy "Users create reservations" on public.reservation_requests
 for insert with check (requester_id = auth.uid());
 create policy "Users view their reservations" on public.reservation_requests
@@ -499,6 +983,320 @@ begin
 end;
 $$;
 
+drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
 after insert on auth.users
 for each row execute function public.handle_new_user();
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values
+  ('images', 'images', false, 10485760, array['image/jpeg', 'image/png', 'image/webp', 'image/gif']::text[]),
+  ('dev-console-assets', 'dev-console-assets', true, 10485760, array['image/jpeg', 'image/png', 'image/webp', 'image/gif']::text[]),
+  ('videos', 'videos', false, 104857600, array['video/mp4', 'video/webm', 'video/quicktime']::text[])
+on conflict (id) do update
+set public = excluded.public,
+    file_size_limit = excluded.file_size_limit,
+    allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "Users upload their own images" on storage.objects;
+drop policy if exists "Users view their own images" on storage.objects;
+drop policy if exists "Users update their own images" on storage.objects;
+drop policy if exists "Users delete their own images" on storage.objects;
+drop policy if exists "Users upload their own videos" on storage.objects;
+drop policy if exists "Users view their own videos" on storage.objects;
+drop policy if exists "Users update their own videos" on storage.objects;
+drop policy if exists "Users delete their own videos" on storage.objects;
+
+create policy "Users upload their own images"
+on storage.objects for insert to authenticated
+with check (
+  bucket_id = 'images'
+  and (storage.foldername(name))[1] = (select auth.uid()::text)
+);
+
+create policy "Users view their own images"
+on storage.objects for select to authenticated
+using (
+  bucket_id = 'images'
+  and (storage.foldername(name))[1] = (select auth.uid()::text)
+);
+
+create policy "Users update their own images"
+on storage.objects for update to authenticated
+using (
+  bucket_id = 'images'
+  and (storage.foldername(name))[1] = (select auth.uid()::text)
+)
+with check (
+  bucket_id = 'images'
+  and (storage.foldername(name))[1] = (select auth.uid()::text)
+);
+
+create policy "Users delete their own images"
+on storage.objects for delete to authenticated
+using (
+  bucket_id = 'images'
+  and (storage.foldername(name))[1] = (select auth.uid()::text)
+);
+
+create policy "Users upload their own videos"
+on storage.objects for insert to authenticated
+with check (
+  bucket_id = 'videos'
+  and (storage.foldername(name))[1] = (select auth.uid()::text)
+);
+
+create policy "Users view their own videos"
+on storage.objects for select to authenticated
+using (
+  bucket_id = 'videos'
+  and (storage.foldername(name))[1] = (select auth.uid()::text)
+);
+
+create policy "Users update their own videos"
+on storage.objects for update to authenticated
+using (
+  bucket_id = 'videos'
+  and (storage.foldername(name))[1] = (select auth.uid()::text)
+)
+with check (
+  bucket_id = 'videos'
+  and (storage.foldername(name))[1] = (select auth.uid()::text)
+);
+
+create policy "Users delete their own videos"
+on storage.objects for delete to authenticated
+using (
+  bucket_id = 'videos'
+  and (storage.foldername(name))[1] = (select auth.uid()::text)
+);
+
+drop policy if exists "Developers manage console banner assets" on storage.objects;
+create policy "Developers manage console banner assets"
+on storage.objects for all to authenticated
+using (
+  bucket_id = 'dev-console-assets'
+  and public.is_dev_console_admin()
+)
+with check (
+  bucket_id = 'dev-console-assets'
+  and public.is_dev_console_admin()
+);
+
+alter table public.businesses
+  add column if not exists setup_status jsonb not null default '{}'::jsonb;
+
+create or replace function public.save_business_workspace(p_workspace jsonb)
+returns uuid
+language plpgsql
+set search_path = public, pg_temp
+as $$
+declare
+  v_owner_id uuid := auth.uid();
+  v_business jsonb;
+  v_business_id uuid;
+  v_requested_id uuid;
+  v_entry record;
+  v_item jsonb;
+  v_item_id uuid;
+  v_day smallint;
+  v_item_name text;
+  v_item_category text;
+  v_item_price numeric(12, 2);
+  v_item_key text;
+  v_item_hash text;
+  v_verification_status public.business_verification_status;
+begin
+  if v_owner_id is null then
+    raise exception 'Sign in as the business owner before saving business data.';
+  end if;
+
+  if jsonb_typeof(p_workspace) is distinct from 'object'
+     or jsonb_typeof(p_workspace -> 'business') is distinct from 'object' then
+    raise exception 'Business workspace data is missing or invalid.';
+  end if;
+
+  v_business := p_workspace -> 'business';
+
+  if nullif(v_business ->> 'id', '') is not null then
+    if (v_business ->> 'id') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+      raise exception 'The business ID is invalid. Reload the business and try again.';
+    end if;
+
+    v_requested_id := (v_business ->> 'id')::uuid;
+    select b.id into v_business_id
+    from public.businesses b
+    where b.id = v_requested_id and b.owner_id = v_owner_id;
+
+    if v_business_id is null then
+      raise exception 'The business was not found for this account or is not owned by you.';
+    end if;
+  else
+    select b.id into v_business_id
+    from public.businesses b
+    where b.owner_id = v_owner_id
+    order by b.created_at, b.id
+    limit 1;
+  end if;
+
+  v_verification_status := case v_business #>> '{verification,status}'
+    when 'pending' then 'pending'::public.business_verification_status
+    when 'verified' then 'verified'::public.business_verification_status
+    when 'needs-docs' then 'needs-docs'::public.business_verification_status
+    when 'rejected' then 'needs-docs'::public.business_verification_status
+    else 'none'::public.business_verification_status
+  end;
+
+  if v_business_id is null then
+    insert into public.businesses (
+      owner_id, name, business_type, price_range, address, city, latitude, longitude,
+      contact_name, mobile, landline, about, specialties, languages, goals, cover_url,
+      links, live, live_at, verification_status, verification_method, verification_files, verification_data,
+      onsite_date, setup_status
+    )
+    values (
+      v_owner_id,
+      coalesce(v_business ->> 'name', ''),
+      nullif(v_business ->> 'type', ''),
+      nullif(v_business ->> 'price', ''),
+      coalesce(v_business ->> 'address', ''),
+      coalesce(v_business ->> 'city', ''),
+      nullif(v_business #>> '{pin,lat}', '')::double precision,
+      nullif(v_business #>> '{pin,lng}', '')::double precision,
+      coalesce(v_business ->> 'contactName', ''),
+      coalesce(v_business ->> 'mobile', ''),
+      coalesce(v_business ->> 'landline', ''),
+      coalesce(v_business ->> 'about', ''),
+      coalesce(array(select jsonb_array_elements_text(v_business -> 'specialties')), '{}'::text[]),
+      coalesce(array(select jsonb_array_elements_text(v_business -> 'languages')), '{}'::text[]),
+      coalesce(array(select jsonb_array_elements_text(v_business -> 'goals')), '{}'::text[]),
+      nullif(v_business ->> 'cover', ''),
+      coalesce(v_business -> 'links', '{"facebook":"","instagram":"","tiktok":"","website":""}'::jsonb),
+      coalesce((v_business ->> 'live')::boolean, false),
+      nullif(v_business ->> 'liveAt', '')::timestamptz,
+      v_verification_status,
+      nullif(v_business #>> '{verification,method}', ''),
+      coalesce(array(select jsonb_array_elements_text(v_business #> '{verification,files}')), '{}'::text[]),
+      coalesce(v_business -> 'verification', '{}'::jsonb),
+      nullif(v_business #>> '{verification,onsiteDate}', '')::date,
+      coalesce(v_business -> 'status', '{}'::jsonb)
+    )
+    returning id into v_business_id;
+  else
+    update public.businesses
+    set name = coalesce(v_business ->> 'name', name),
+        business_type = nullif(v_business ->> 'type', ''),
+        price_range = nullif(v_business ->> 'price', ''),
+        address = coalesce(v_business ->> 'address', address),
+        city = coalesce(v_business ->> 'city', city),
+        latitude = nullif(v_business #>> '{pin,lat}', '')::double precision,
+        longitude = nullif(v_business #>> '{pin,lng}', '')::double precision,
+        contact_name = coalesce(v_business ->> 'contactName', contact_name),
+        mobile = coalesce(v_business ->> 'mobile', mobile),
+        landline = coalesce(v_business ->> 'landline', landline),
+        about = coalesce(v_business ->> 'about', about),
+        specialties = coalesce(array(select jsonb_array_elements_text(v_business -> 'specialties')), '{}'::text[]),
+        languages = coalesce(array(select jsonb_array_elements_text(v_business -> 'languages')), '{}'::text[]),
+        goals = coalesce(array(select jsonb_array_elements_text(v_business -> 'goals')), '{}'::text[]),
+        cover_url = nullif(v_business ->> 'cover', ''),
+        links = coalesce(v_business -> 'links', links),
+        live = coalesce((v_business ->> 'live')::boolean, live),
+        live_at = nullif(v_business ->> 'liveAt', '')::timestamptz,
+        verification_status = v_verification_status,
+        verification_method = nullif(v_business #>> '{verification,method}', ''),
+        verification_files = coalesce(array(select jsonb_array_elements_text(v_business #> '{verification,files}')), '{}'::text[]),
+        verification_data = coalesce(v_business -> 'verification', verification_data),
+        onsite_date = nullif(v_business #>> '{verification,onsiteDate}', '')::date,
+        setup_status = coalesce(v_business -> 'status', '{}'::jsonb)
+    where id = v_business_id and owner_id = v_owner_id;
+
+    if not found then
+      raise exception 'The business could not be updated for this account.';
+    end if;
+  end if;
+
+  if jsonb_typeof(v_business -> 'hours') = 'object' then
+    for v_entry in select key, value from jsonb_each(v_business -> 'hours')
+    loop
+      v_day := case v_entry.key
+        when 'mon' then 0 when 'tue' then 1 when 'wed' then 2
+        when 'thu' then 3 when 'fri' then 4 when 'sat' then 5
+        when 'sun' then 6
+        else null
+      end;
+
+      if v_day is null then
+        raise exception 'Unrecognized business-hours day: %.', v_entry.key;
+      end if;
+
+      insert into public.business_hours (
+        business_id, day_of_week, opens_at, closes_at, is_closed, all_day
+      )
+      values (
+        v_business_id,
+        v_day,
+        nullif(v_entry.value ->> 'open', '')::time,
+        nullif(v_entry.value ->> 'close', '')::time,
+        coalesce((v_entry.value ->> 'closed')::boolean, false),
+        coalesce((v_entry.value ->> 'allDay')::boolean, false)
+      )
+      on conflict (business_id, day_of_week) do update
+      set opens_at = excluded.opens_at,
+          closes_at = excluded.closes_at,
+          is_closed = excluded.is_closed,
+          all_day = excluded.all_day;
+    end loop;
+  end if;
+
+  if jsonb_typeof(v_business -> 'menu') = 'array' then
+    for v_entry in
+      select value, ordinality
+      from jsonb_array_elements(v_business -> 'menu') with ordinality
+    loop
+      v_item := v_entry.value;
+      v_item_name := nullif(btrim(v_item ->> 'name'), '');
+      if v_item_name is null then
+        continue;
+      end if;
+
+      if nullif(v_item ->> 'price', '') is null
+         or (v_item ->> 'price') !~ '^[0-9]+(\.[0-9]{1,2})?$' then
+        raise exception 'Enter a valid price for menu item "%".', v_item_name;
+      end if;
+      v_item_price := (v_item ->> 'price')::numeric(12, 2);
+      v_item_category := coalesce(v_item ->> 'category', '');
+      v_item_key := coalesce(v_item ->> 'id', v_entry.ordinality::text);
+
+      if v_item_key ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+        v_item_id := v_item_key::uuid;
+        if exists (select 1 from public.menu_items mi where mi.id = v_item_id and mi.business_id <> v_business_id) then
+          raise exception 'A menu item ID does not belong to this business.';
+        end if;
+      else
+        v_item_hash := md5(v_business_id::text || ':' || v_item_key);
+        v_item_id := (
+          substr(v_item_hash, 1, 8) || '-' || substr(v_item_hash, 9, 4) || '-' ||
+          substr(v_item_hash, 13, 4) || '-' || substr(v_item_hash, 17, 4) || '-' ||
+          substr(v_item_hash, 21, 12)
+        )::uuid;
+      end if;
+
+      insert into public.menu_items (id, business_id, name, price, category, sort_order)
+      values (v_item_id, v_business_id, v_item_name, v_item_price, v_item_category, v_entry.ordinality - 1)
+      on conflict (id) do update
+      set name = excluded.name,
+          price = excluded.price,
+          category = excluded.category,
+          sort_order = excluded.sort_order
+      where public.menu_items.business_id = v_business_id;
+    end loop;
+  end if;
+
+  return v_business_id;
+end;
+$$;
+
+revoke all on function public.save_business_workspace(jsonb) from public;
+grant execute on function public.save_business_workspace(jsonb) to authenticated;
+
+notify pgrst, 'reload schema';

@@ -1,9 +1,13 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { emptyBusiness, type BusinessProfile } from '@/app/account'
 import { LangOverride, type Lang } from '@/app/i18n'
 import type { Expression } from '@/components/mascot/Jimbot'
-import { getForcedState, isEmbed } from '@/lib/forced'
+import { getForcedState } from '@/lib/forced'
+import { AUTH_INTENT_KEY, AUTH_ROLE_KEY } from '@/lib/authFlow'
+import { supabase } from '@/lib/supabase'
 import { usePersistentState } from '@/lib/usePersistentState'
+import { clearBitinaryBrowserCache } from '@/lib/clearBitinaryBrowserCache'
+import { loadOwnedWorkspace } from './db/loadWorkspace'
 import {
   demoBusiness, seedBoosts, seedBranches, seedCases, seedComments, seedDeals, seedNotifs, seedPosts, seedRequests, seedReviews, seedStaff, ago,
   type Boost, type Branch, type Case, type Comment, type Deal, type Notif, type Post, type ResRequest, type Review, type Staff,
@@ -37,6 +41,11 @@ export type BizData = {
   qrToken: string
   blocked: string[]
   reportsUsed: number
+}
+
+function persistedWorkspace(data: BizData) {
+  const { langPref: _langPref, session: _session, resume: _resume, profile: _profile, ...workspace } = data
+  return workspace
 }
 
 const updatedSeed = { basics: ago(40 * 864e5), location: ago(40 * 864e5), hours: ago(9 * 864e5), contact: ago(40 * 864e5), menu: ago(3 * 864e5), photos: ago(12 * 864e5), about: ago(30 * 864e5), online: ago(30 * 864e5), verify: ago(2 * 864e5) }
@@ -109,6 +118,10 @@ type Ctx = {
   toast: Toast | null
   showToast: (t: Omit<Toast, 'id'>) => void
   dismissToast: () => void
+  loading: boolean
+  loadError: string | null
+  retryLoad: () => void
+  signOut: () => Promise<{ error: string | null }>
   loadDemo: () => void
   reset: () => void
 }
@@ -123,20 +136,81 @@ const queryLang = (): Lang | null => {
 export function statusOf(b: BusinessProfile): BizStatus {
   if (!b.live) return 'draft'
   const v = b.verification.status
-  return v === 'verified' ? 'verified' : v === 'pending' ? 'pending' : v === 'needs-docs' ? 'needs-docs' : 'live'
+  return v === 'verified' ? 'verified' : v === 'pending' ? 'pending' : v === 'needs-docs' || v === 'rejected' ? 'needs-docs' : 'live'
 }
 
 export function BizProvider({ children }: { children: ReactNode }) {
-  const [data, setData] = usePersistentState<BizData>('biz', initialData)
+  const [data, setData] = useState<BizData>(initialData)
+  const [storedLang, setStoredLang] = usePersistentState<LangPref | null>('biz-lang', null)
   const [toast, setToast] = useState<Toast | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const dataRef = useRef(data)
+  const storedLangRef = useRef(storedLang)
+  storedLangRef.current = storedLang
+  const saveQueue = useRef<Promise<void>>(Promise.resolve())
+  const [loadVersion, setLoadVersion] = useState(0)
   const forced = getForcedState()
-  // Screen Index frames (embed) without a session show the demo business and keep edits in memory only.
-  const [demo, setDemo] = useState<BizData>(() => ({ ...demoData, langPref: data.langPref ?? 'en' }))
-  const sandbox = isEmbed() && !data.session
-  const base = sandbox ? demo : data
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setLoadError(null)
+    void supabase.auth.getSession().then(async ({ data: sessionData, error: sessionError }) => {
+      if (sessionError) throw sessionError
+      if (!sessionData.session) return { ...initialData, langPref: storedLangRef.current }
+      const result = await loadOwnedWorkspace()
+      if (result.error) throw new Error(result.error)
+      const user = sessionData.session.user
+      const businessUser =
+        user.user_metadata?.role === 'business' ||
+        (sessionStorage.getItem(AUTH_INTENT_KEY) === 'signup' &&
+          sessionStorage.getItem(AUTH_ROLE_KEY) === 'business')
+      const session = result.data || businessUser
+        ? { method: user.phone ? 'mobile' as const : 'email' as const, contact: user.email ?? user.phone ?? '' }
+        : null
+      const workspace = result.data ?? initialData
+      return {
+        ...workspace,
+        langPref: storedLangRef.current,
+        session,
+        profile: {
+          ...workspace.profile,
+          name: workspace.profile.name || String(user.user_metadata?.name ?? user.user_metadata?.full_name ?? ''),
+          email: workspace.profile.email || user.email || '',
+          mobile: workspace.profile.mobile || user.phone || '',
+        },
+      }
+    }).then((workspace) => {
+      if (!active) return
+      dataRef.current = workspace
+      setData(workspace)
+      setLoading(false)
+    }).catch((error: unknown) => {
+      if (!active) return
+      setLoadError(error instanceof Error ? error.message : 'Business data could not be loaded.')
+      setLoading(false)
+    })
+    return () => { active = false }
+  }, [loadVersion])
+
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        const next = { ...initialData, langPref: storedLangRef.current }
+        dataRef.current = next
+        setData(next)
+        setLoadError(null)
+        setLoading(false)
+      } else if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        setLoadVersion((version) => version + 1)
+      }
+    })
+    return () => authListener.subscription.unsubscribe()
+  }, [])
 
   const view = useMemo<BizData>(() => {
-    let v = base
+    let v = data
     const b = v.business
     const ver = (s: BusinessProfile['verification']['status']) => ({ ...v, business: { ...b, live: true, verification: { ...b.verification, status: s } } })
     if (forced === 'verified') v = ver('verified')
@@ -147,12 +221,47 @@ export function BizProvider({ children }: { children: ReactNode }) {
     if (forced === 'setup-ready') v = { ...v, business: { ...b, live: false, verification: { ...b.verification, status: 'none' }, status: { basics: 'done', location: 'done', hours: 'done', contact: 'done', menu: 'done' } } }
     if (forced === 'draft') v = { ...v, business: { ...b, live: false, verification: { ...b.verification, status: 'none' }, status: { basics: 'done', location: 'done' } } }
     return v
-  }, [base, forced])
+  }, [data, forced])
 
   const lang: Lang = queryLang() ?? (data.langPref === 'device' ? deviceLang() : data.langPref ?? 'en')
   const t = useCallback((tl: string, en: string) => (lang === 'en' ? en : tl), [lang])
-  const set = useCallback((fn: (d: BizData) => BizData) => (sandbox ? setDemo(fn) : setData(fn)), [sandbox, setData])
+  const set = useCallback((fn: (d: BizData) => BizData) => {
+    saveQueue.current = saveQueue.current.then(async () => {
+      const previous = dataRef.current
+      const next = fn(previous)
+      const payload = persistedWorkspace(next)
+      if (JSON.stringify(persistedWorkspace(previous)) === JSON.stringify(payload)) {
+        dataRef.current = next
+        setData(next)
+        return
+      }
+      const { error } = await supabase.rpc('save_business_workspace', { p_workspace: payload })
+      if (error) throw new Error(error.message)
+      dataRef.current = next
+      setData(next)
+    }).catch((error: unknown) => {
+      setToast({ id: Date.now(), text: error instanceof Error ? error.message : 'Business changes could not be saved.' })
+    })
+  }, [])
   const showToast = useCallback((x: Omit<Toast, 'id'>) => setToast({ ...x, id: Date.now() }), [])
+  const signOut = useCallback(async () => {
+    const { error } = await supabase.auth.signOut()
+    if (error) {
+      showToast({ text: error.message })
+      return { error: error.message }
+    }
+    const next = { ...initialData, langPref: storedLangRef.current }
+    dataRef.current = next
+    setData(next)
+    try {
+      await clearBitinaryBrowserCache()
+    } catch (cacheError: unknown) {
+      const message = cacheError instanceof Error ? cacheError.message : 'Browser cache could not be cleared.'
+      showToast({ text: `Signed out, but Bitinary cache could not be cleared: ${message}` })
+      return { error: message }
+    }
+    return { error: null }
+  }, [showToast])
   const status = statusOf(view.business)
 
   const value: Ctx = {
@@ -160,18 +269,30 @@ export function BizProvider({ children }: { children: ReactNode }) {
     set,
     lang,
     t,
-    setLangPref: (l) => setData((d) => ({ ...d, langPref: l })),
+    setLangPref: (l) => {
+      setStoredLang(l)
+      dataRef.current = { ...dataRef.current, langPref: l }
+      setData(dataRef.current)
+    },
     status,
     verified: status === 'verified',
     toast,
     showToast,
     dismissToast: () => setToast(null),
-    loadDemo: () => setData((d) => ({ ...demoData, langPref: d.langPref ?? 'en' })),
-    reset: () => setData((d) => ({ ...initialData, langPref: d.langPref })),
+    loading,
+    loadError,
+    retryLoad: () => setLoadVersion((version) => version + 1),
+    signOut,
+    loadDemo: () => showToast({ text: 'Demo data is disabled for database-backed business accounts.' }),
+    reset: () => showToast({ text: 'Business data cannot be reset from this screen.' }),
   }
   return (
     <C.Provider value={value}>
-      <LangOverride lang={lang} setLang={(l) => setData((d) => ({ ...d, langPref: l }))} chosen={!!data.langPref}>
+      <LangOverride lang={lang} setLang={(l) => {
+        setStoredLang(l)
+        dataRef.current = { ...dataRef.current, langPref: l }
+        setData(dataRef.current)
+      }} chosen={!!data.langPref}>
         {children}
       </LangOverride>
     </C.Provider>

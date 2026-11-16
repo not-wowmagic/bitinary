@@ -13,6 +13,7 @@ import { promos } from '@/data/promos'
 import { cn } from '@/lib/cn'
 import { src } from '@/lib/media'
 import { shrink } from '@/screens/personalize/TravelerThemes'
+import { supabase } from '@/lib/supabase'
 import { fmtDate } from './data'
 import { Badge, Empty, Field, PageHead, Panel, field } from './ui'
 
@@ -129,7 +130,7 @@ export function BannersPage() {
                 })}
               </ul>
             ) : (
-              <Empty title="Nothing here yet" body="This spot stays empty in the app until you add a banner." />
+              <Empty title="No banners for this placement" body="Add a banner to show one here in the app." />
             )}
           </Panel>
         ))}
@@ -151,6 +152,7 @@ export function BannerEditor() {
   const [b, setB] = useState<Banner>(() => existing ?? blank(initialPlacement))
   const [tried, setTried] = useState(false)
   const [del, setDel] = useState(false)
+  const [saving, setSaving] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const set = (p: Partial<Banner>) => setB((x) => ({ ...x, ...p }))
 
@@ -179,22 +181,31 @@ export function BannerEditor() {
     )
   }
 
-  const save = (status: Banner['status']) => {
+  const save = async (status: Banner['status']) => {
     setTried(true)
-    if (Object.keys(errors).length) return
-    const next = { ...b, status, name: b.name.trim() || b.title.trim() }
-    // Images are stored in the browser; check there is room before saving.
+    if (Object.keys(errors).length || saving) return
+    setSaving(true)
     try {
-      localStorage.setItem('bitinary:__room', JSON.stringify(next) + (localStorage.getItem('bitinary:console') ?? ''))
-      localStorage.removeItem('bitinary:__room')
-    } catch {
-      localStorage.removeItem('bitinary:__room')
-      showToast({ text: 'Storage is full. Use a smaller image or remove old banners.', expression: 'unsure' })
-      return
+      const next = { ...b, status, name: b.name.trim() || b.title.trim() }
+      if (next.image?.startsWith('data:')) {
+        const { data: { user }, error: userError } = await supabase.auth.getUser()
+        if (userError) throw userError
+        if (!user) throw new Error('Sign in again before uploading a banner image.')
+        const blob = await (await fetch(next.image)).blob()
+        if (blob.size > 10 * 1024 * 1024) throw new Error('Banner images must be smaller than 10 MB.')
+        const path = `${user.id}/banners/${next.id}`
+        const { error: uploadError } = await supabase.storage.from('dev-console-assets').upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: true })
+        if (uploadError) throw uploadError
+        next.image = supabase.storage.from('dev-console-assets').getPublicUrl(path).data.publicUrl
+      }
+      await update((x) => ({ ...x, banners: existing ? x.banners.map((y) => (y.id === next.id ? next : y)) : [...x.banners, { ...next, priority: x.banners.filter((y) => y.placement === next.placement).length }] }), { area: 'Banners', action: `${existing ? 'Updated' : 'Created'} "${next.name}" (${status})`, target: next.id })
+      showToast({ text: status === 'live' ? 'Banner published.' : status === 'paused' ? 'Banner paused.' : 'Banner draft saved.', expression: 'celebrating' })
+      navigate('/bitinarydev/banners')
+    } catch (reason) {
+      showToast({ text: reason instanceof Error ? `Couldn’t save the banner: ${reason.message}` : 'Couldn’t save the banner. Please try again.', expression: 'unsure' })
+    } finally {
+      setSaving(false)
     }
-    update((x) => ({ ...x, banners: existing ? x.banners.map((y) => (y.id === next.id ? next : y)) : [...x.banners, { ...next, priority: x.banners.filter((y) => y.placement === next.placement).length }] }), { area: 'Banners', action: `${existing ? 'Updated' : 'Created'} "${next.name}" (${status})`, target: next.id })
-    showToast({ text: status === 'live' ? 'Banner is live' : status === 'paused' ? 'Banner paused' : 'Draft saved', expression: 'celebrating' })
-    navigate('/bitinarydev/banners')
   }
   const duplicate = () => {
     const copy = { ...b, id: `bn-${Date.now()}`, name: `${b.name || b.title} (copy)`, status: 'draft' as const, stats: { views: 0, clicks: 0 } }
@@ -392,15 +403,15 @@ export function BannerEditor() {
             </div>
           </Panel>
           <div className="card flex flex-wrap gap-2 p-4">
-            <Button variant="secondary" icon={<Save size={17} />} onClick={() => save(existing?.status === 'paused' ? 'paused' : 'draft')}>
-              Save draft
+            <Button variant="secondary" icon={<Save size={17} />} disabled={saving} onClick={() => void save(existing?.status === 'paused' ? 'paused' : 'draft')}>
+              {saving ? 'Saving…' : 'Save draft'}
             </Button>
             {existing?.status === 'live' && (
-              <Button variant="secondary" icon={<Pause size={17} />} onClick={() => save('paused')}>
+              <Button variant="secondary" icon={<Pause size={17} />} disabled={saving} onClick={() => void save('paused')}>
                 Pause
               </Button>
             )}
-            <Button className="flex-1" icon={<Send size={17} />} onClick={() => save('live')}>
+            <Button className="flex-1" icon={<Send size={17} />} disabled={saving} onClick={() => void save('live')}>
               {existing?.status === 'live' ? 'Save and keep live' : 'Publish'}
             </Button>
             {tried && Object.keys(errors).length > 0 && <p className="w-full text-[13px] font-semibold text-danger">Fix the highlighted fields first.</p>}

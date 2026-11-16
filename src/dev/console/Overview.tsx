@@ -10,7 +10,7 @@ import { Badge, Empty, PageHead, Panel, Stat } from './ui'
 
 export function Overview() {
   const { c, update } = useConsole()
-  const users = useConsoleUsers()
+  const { users } = useConsoleUsers()
   const mod = useModeration()
   const navigate = useNavigate()
   const live = c.banners.filter((b) => bannerActive(b))
@@ -19,14 +19,14 @@ export function Overview() {
   const reviewsToday = mod.filter((m) => m.kind === 'review' && new Date(m.at).getTime() > dayAgo).length
   const flagged = mod.filter((m) => m.flags.length && !m.removed).length
   const storage = storageUsage()
-  const ver = useVerifications()
+  const { rows: ver } = useVerifications()
   const pendingV = ver.filter((r) => r.v.status === 'pending').length
   const expiredV = ver.filter((r) => verifyState(r.v) === 'expired').length
   return (
     <>
-      <PageHead title="Dashboard" sub="Everything in Bitinary on this device, in one place." />
+      <PageHead title="Dashboard" sub="Database-backed settings, operations, and recent developer activity." />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 2xl:grid-cols-7">
-        <Stat label="Users" value={users.length} sub={`${users.filter((u) => u.source !== 'sample').length} on this device`} icon={<Users size={20} />} onClick={() => navigate('users')} />
+        <Stat label="Users" value={users.length} sub="Known accounts" icon={<Users size={20} />} onClick={() => navigate('users')} />
         <Stat label="Live banners" value={live.length} sub={`${c.banners.length} total`} icon={<Megaphone size={20} />} onClick={() => navigate('banners')} />
         <Stat label="Banner clicks" value={clicks.toLocaleString()} sub="All time" icon={<MousePointerClick size={20} />} onClick={() => navigate('banners')} />
         <Stat label="Reviews today" value={reviewsToday} icon={<Star size={20} />} onClick={() => navigate('moderation?kind=review')} />
