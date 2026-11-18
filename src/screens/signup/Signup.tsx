@@ -913,8 +913,11 @@ export function ReadyStep() {
             block
             variant="ghost"
             className={cn("!h-12")}
-            onClick={() => {
-              setPrefs((current) => skipAllTravelerPreferences(current))
+            onClick={async () => {
+              const result = await setPrefs((current) =>
+                skipAllTravelerPreferences(current),
+              )
+              if (result.error) return
               navigate("/", { replace: true })
             }}
           >

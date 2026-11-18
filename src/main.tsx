@@ -1,11 +1,11 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './app/App'
-// Bootstrap (business profile components) loads first, in the lowest CSS layer.
+// Unang nilo-load ang Bootstrap para manatili itong nasa pinakamababang CSS layer.
 import './styles/bootstrap.scss'
 import './index.css'
 
-// Apply the theme before first paint so color transitions don't animate from light to dark on load.
+// Itakda ang theme bago ang unang paint para iwas flash o transition mula sa maling theme.
 ;(() => {
   const q = new URLSearchParams(window.location.search).get('theme')
   let mode: string | null = null

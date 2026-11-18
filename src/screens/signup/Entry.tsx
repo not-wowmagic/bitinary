@@ -7,6 +7,7 @@ import { useLang, type Lang } from '@/app/i18n'
 import { SelectCard } from '@/components/flow/Fields'
 import { Jimbot } from '@/components/mascot/Jimbot'
 import { Button } from '@/components/ui/Button'
+import { authenticatedContinuationPath } from '@/lib/authFlow'
 import { getForcedState } from '@/lib/forced'
 
 function Weave({ id }: { id: string }) {
@@ -24,7 +25,7 @@ function Weave({ id }: { id: string }) {
 
 export function nextAfterSplash(a: ReturnType<typeof useAccount>, langChosen: boolean) {
   if (!langChosen) return '/language'
-  if (a.session?.kind === 'user') return a.setupDone ? (a.role === 'business' ? '/biz' : '/') : (a.resume?.path ?? '/signup/name')
+  if (a.session?.kind === 'user') return authenticatedContinuationPath(a.role, a.setupDone, a.resume?.path)
   if (a.session?.kind === 'guest') return '/'
   return '/welcome'
 }
@@ -106,9 +107,20 @@ export function LanguagePick() {
 export function Welcome() {
   const navigate = useNavigate()
   const { t, lang, setLang } = useLang()
-  const { resume, session, setupDone, continueAsGuest } = useAccount()
+  const { resume, session, setupDone, role, continueAsGuest } = useAccount()
   const forced = getForcedState()
   const canResume = forced === 'resume' || (!!resume && !(session?.kind === 'user' && setupDone))
+  const businessSession = session?.kind === 'user' && role === 'business'
+  const businessContinuation = authenticatedContinuationPath(
+    'business',
+    setupDone,
+    resume?.path,
+  )
+
+  useEffect(() => {
+    if (businessSession) navigate(businessContinuation, { replace: true })
+  }, [businessContinuation, businessSession, navigate])
+
   return (
     <main className="relative flex min-h-dvh flex-col bg-primary md:flex-row">
       <Weave id="wc-weave" />

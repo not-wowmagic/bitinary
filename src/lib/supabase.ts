@@ -7,6 +7,7 @@ if (!url || !anonKey) {
   throw new Error('Missing Supabase environment variables. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, or SUPABASE_URL and SUPABASE_ANON_KEY.')
 }
 
+// Public client key lang ang ligtas ilagay sa browser; RLS ang dapat magpatupad ng access.
 export const supabase = createClient(url, anonKey, {
   auth: {
     persistSession: true,

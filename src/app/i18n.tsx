@@ -10,7 +10,7 @@ const queryLang = (): Lang | null => {
   return l === 'tl' || l === 'en' ? l : null
 }
 
-/** Tagalog / English. `?lang=en` overrides for Screen Index frames. */
+/** Tagalog/English ito; inuuna ang `?lang=` para sa Screen Index frames. */
 export function LangProvider({ children }: { children: ReactNode }) {
   const [stored, setStored] = usePersistentState<Lang | null>('lang', null)
   const forced = useMemo(queryLang, [])
@@ -22,7 +22,7 @@ export function LangProvider({ children }: { children: ReactNode }) {
   return <C.Provider value={{ lang, setLang: setStored, chosen: !!stored || !!forced, t }}>{children}</C.Provider>
 }
 
-/** Lets a separate app (Bitinary Business) supply its own language to shared components. */
+/** Pinapagamit nito sa Business app ang sariling language setting sa shared components. */
 export function LangOverride({ lang, setLang, chosen = true, children }: { lang: Lang; setLang: (l: Lang) => void; chosen?: boolean; children: ReactNode }) {
   useEffect(() => {
     document.documentElement.lang = lang === 'tl' ? 'tl' : 'en'

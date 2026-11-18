@@ -1,13 +1,16 @@
-import { ArrowUp, ChevronLeft, Clock3, MapPin, MessageSquareText, PiggyBank, Plus, ThumbsDown, ThumbsUp } from 'lucide-react'
+import { ArrowUp, ChevronLeft, ChevronRight, Clock3, MapPin, MessageSquareText, PiggyBank, Plus, ThumbsDown, ThumbsUp } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
+import { useLang } from '@/app/i18n'
 import { BudgetSheet } from '@/components/BudgetSheet'
 import { Jimbot } from '@/components/mascot/Jimbot'
 import { OfflineState } from '@/components/states/States'
 import { Button } from '@/components/ui/Button'
 import { PhaseTag } from '@/components/ui/PhaseTag'
+import { Skeleton } from '@/components/ui/Skeleton'
 import type { ChatBusinessResult, ChatItineraryResult, ChatResult, Msg } from '@/data/chat'
+import { resolveBusinessImage } from '@/biz/db/assets'
 import { cn } from '@/lib/cn'
 import { supabase } from '@/lib/supabase'
 import { useOnline } from '@/lib/useOnline'
@@ -60,6 +63,7 @@ export interface ChatContext {
   /** consecutive messages Jimbot could not understand */
   fallbackCount: number
   slots: Entities
+  lastIntent?: 'itinerary' | 'database_search' | 'budget'
 }
 
 /* ============================ NORMALIZING ========================== */
@@ -102,11 +106,11 @@ const KEYWORDS: Record<Exclude<Intent, 'fallback_gibberish' | 'fallback_unclear'
   itinerary: [
     ['itinerary', 2], ['itineraryo', 2], ['plano', 2], ['planuhin', 2], ['biyahe', 2],
     ['byahe', 2], ['trip', 2], ['tour', 1], ['gala', 2], ['laag', 2], ['maglaag', 2], ['lakaw', 2], ['vacation', 2], ['bakasyon', 2],
-    ['schedule', 1], ['iskedyul', 1], ['weekend', 1], ['overnight', 1], ['staycation', 2],
+    ['schedule', 1], ['iskedyul', 1], ['weekend', 1], ['overnight', 1], ['staycation', 2], ['getaway', 2], ['day trip', 2], ['travel plan', 2],
   ],
   database_search: [
-    ['kainan', 2], ['kan anan', 2], ['restaurant', 2], ['restawran', 2], ['carinderia', 2], ['negosyo', 2],
-    ['business', 2], ['lugar', 2], ['pasyalan', 2], ['resort', 2], ['cafe', 2], ['coffee shop', 2],
+    ['kainan', 2], ['kan anan', 2], ['restaurant', 2], ['restawran', 2], ['carinderia', 2], ['eatery', 2], ['dining', 2], ['bakery', 2], ['food place', 2], ['negosyo', 2],
+    ['business', 2], ['lugar', 2], ['pasyalan', 2], ['attraction', 2], ['tourist spot', 2], ['things to do', 2], ['museum', 2], ['park', 2], ['resort', 2], ['cafe', 2], ['coffee shop', 2],
     ['kapihan', 2], ['recommend', 2], ['suhestiyon', 2], ['suggest', 2], ['saan', 1],
     ['near', 1], ['malapit', 1], ['hotel', 2], ['tindahan', 1], ['pagkain', 1], ['kain', 1],
     ['masarap', 1], ['beach', 1], ['dagat', 1], ['bundok', 1], ['falls', 1], ['simbahan', 1],
@@ -127,7 +131,7 @@ const COMMON_WORDS = new Set(
     'araw gabi umaga hapon linggo buwan taon bukas ngayon kahapon day days night nights people persons tao kami unsa adto dili ta ' +
     'cebu manila baguio palawan boracay davao bohol iloilo siargao batangas tagaytay').split(' ')
 )
-const KNOWN_LOCATIONS = ['baguio', 'manila', 'cebu', 'cebu city', 'palawan', 'boracay', 'davao', 'bohol', 'iloilo', 'siargao', 'batangas', 'tagaytay', 'intramuros', 'binondo', 'makati', 'quezon city']
+const KNOWN_LOCATIONS = ['quezon city', 'cebu city', 'intramuros', 'tagaytay', 'batangas', 'siargao', 'boracay', 'palawan', 'baguio', 'manila', 'davao', 'bohol', 'iloilo', 'binondo', 'makati', 'cebu']
 
 const ALL_KNOWN = new Set<string>(COMMON_WORDS)
 for (const list of Object.values(KEYWORDS)) {
@@ -229,11 +233,11 @@ export function extractEntities(normalized: string): Entities {
   if (days) entities.days = Math.min(parseInt(days[1], 10), 30)
   else if (/weekend/.test(normalized)) entities.days = 2
 
-  const budget = normalized.match(/(?:₱|php|\$|budget(?: ko)?(?: ay)?\s*)\s*(\d{3,7})\s*(?:pesos|php|piso)?|(\d{3,7})\s*(?:pesos|php|piso)/)
-  const budgetAmount = budget?.[1] ?? budget?.[2]
-  if (budgetAmount) entities.budget = parseInt(budgetAmount, 10)
+  const budget = normalized.match(/(?:₱|php|\$|budget(?: ko)?(?: ay| of| is| na)?\s*)\s*(\d+(?:\.\d+)?)\s*(k|thousand)?\b|(\d{3,7})\s*(?:pesos|php|piso)/)
+  const budgetAmount = budget?.[1] ?? budget?.[3]
+  if (budgetAmount) entities.budget = Math.round(parseFloat(budgetAmount) * (budget?.[2] ? 1000 : 1))
 
-  const people = normalized.match(/\b(\d{1,2})\s*(?:tao|katao|people|persons?|pax)\b/)
+  const people = normalized.match(/\b(\d{1,2})\s*(?:tao|katao|people|persons?|pax|adults?|kids|children|travelers?|travellers?|of us)\b/)
   if (people) entities.people = Math.min(parseInt(people[1], 10), 30)
   else {
     const wordPeople = normalized.match(/\b(isa|dalawa|tatlo|apat|lima|anim)\s+(?:kami|tao|katao|people|pax)\b/)
@@ -248,10 +252,10 @@ export function extractEntities(normalized: string): Entities {
       ? normalized.includes(word)
       : tokens.some((token) => token === word || (word.length >= 6 && tokenMatchesWord(token, word))),
   )
-  if (hasCategory('kainan', 'kan anan', 'restaurant', 'restawran', 'carinderia', 'pagkain', 'kain')) entities.category = 'kainan'
+  if (hasCategory('kainan', 'kan anan', 'restaurant', 'restawran', 'carinderia', 'eatery', 'dining', 'bakery', 'food', 'pagkain', 'kain')) entities.category = 'kainan'
   else if (hasCategory('cafe', 'kapihan', 'coffee')) entities.category = 'cafe'
   else if (hasCategory('resort', 'hotel', 'beach', 'dagat')) entities.category = 'resort'
-  else if (hasCategory('pasyalan', 'falls', 'bundok', 'simbahan')) entities.category = 'pasyalan'
+  else if (hasCategory('pasyalan', 'attraction', 'tourist spot', 'things to do', 'museum', 'park', 'falls', 'bundok', 'simbahan')) entities.category = 'pasyalan'
   else if (hasCategory('negosyo', 'business', 'tindahan')) entities.category = 'negosyo'
 
   if (/\b(tipid|mura|barato|cheap|budget friendly)\b/.test(normalized)) entities.vibe = 'tipid'
@@ -310,6 +314,16 @@ export function detectIntent(raw: string): IntentResult {
   if (entities.days) scores.set('itinerary', (scores.get('itinerary') ?? 0) + 2)
   if (entities.budget) scores.set('budget', (scores.get('budget') ?? 0) + 1)
   if (entities.category) scores.set('database_search', (scores.get('database_search') ?? 0) + 1)
+
+  const isShortDatabaseLookup =
+    KNOWN_LOCATIONS.includes(normalized) ||
+    (tokens.length <= 2 &&
+      tokens.every((token) => !COMMON_WORDS.has(token) && !isGibberishToken(token)) &&
+      tokens.some((token) => token.length >= 4))
+
+  if (scores.size === 0 && isShortDatabaseLookup) {
+    return { intent: 'database_search', confidence: 0.65, entities, normalized }
+  }
 
   if (scores.size === 0) {
     return { intent: 'fallback_unclear', confidence: 0.3, entities, normalized }
@@ -399,9 +413,17 @@ export function buildReply(result: IntentResult, ctx: ChatContext): ReplyData {
     }
 
     case 'database_search':
+      if (!entities.category && result.confidence <= 0.7) {
+        return {
+          text: `Hahanapin ko ang mga verified na lugar na may kaugnayan sa “${result.normalized}”.`,
+          action: 'SEARCH_DB',
+        }
+      }
       if (!entities.category) return { text: 'Anong uri ng lugar ang hanap mo?', quickReplies: ['Kainan', 'Cafe', 'Resort', 'Pasyalan'] }
-      if (!entities.location) return { text: `Saang lugar ako maghahanap ng ${entities.category}?`, quickReplies: ['Baguio', 'Cebu', 'Intramuros'] }
-      return { text: `Hahanapin ko ang verified na ${entities.category} sa ${entities.location}.`, action: 'SEARCH_DB' }
+      return {
+        text: `Hahanapin ko ang mga verified na ${entities.category}${entities.location ? ` sa ${entities.location}` : ' sa database'}.`,
+        action: 'SEARCH_DB',
+      }
 
     case 'budget':
       return {
@@ -459,11 +481,31 @@ function buildFallback(intent: 'fallback_gibberish' | 'fallback_unclear', ctx: C
 
 export function handleMessage(raw: string, ctx: ChatContext): { reply: ReplyData; ctx: ChatContext; result: IntentResult } {
   let result = detectIntent(raw)
+  if (
+    KNOWN_LOCATIONS.includes(result.normalized) &&
+    (ctx.lastIntent === 'itinerary' || ctx.lastIntent === 'database_search') &&
+    !result.entities.category
+  ) {
+    result = { ...result, intent: ctx.lastIntent, confidence: 0.8 }
+  }
+  const bareAmount = result.normalized.match(/^(\d+(?:\.\d+)?)\s*(k|thousand)?$/)
+  if (result.intent === 'fallback_unclear' && bareAmount && ctx.lastIntent) {
+    const value = Math.round(Number(bareAmount[1]) * (bareAmount[2] ? 1000 : 1))
+    if (ctx.lastIntent === 'itinerary' && !ctx.slots.days && !bareAmount[2] && value >= 1 && value <= 30) {
+      result = { ...result, intent: 'itinerary', confidence: 0.8, entities: { ...result.entities, days: value } }
+    } else if (ctx.lastIntent === 'budget' && !ctx.slots.budget && value >= 100) {
+      result = { ...result, intent: 'budget', confidence: 0.8, entities: { ...result.entities, budget: value } }
+    }
+  }
   const isFollowUp = /\b(mas mura|mas tipid|mas barato|barato|cheap|budget friendly|yung mas|mas mahal|cheaper|cheapest|lower price|sa .+ naman|may parking|with parking)\b/.test(result.normalized)
   if (isFollowUp && (ctx.slots.category || ctx.slots.location)) {
     result = { ...result, intent: 'database_search', confidence: 0.8 }
-  } else if (result.intent === 'fallback_unclear' && extractEntities(result.normalized).location && (ctx.slots.category || ctx.slots.location)) {
-    result = { ...result, intent: 'database_search', confidence: 0.8 }
+  } else if (
+    result.intent === 'fallback_unclear' &&
+    ctx.lastIntent &&
+    Object.keys(result.entities).length > 0
+  ) {
+    result = { ...result, intent: ctx.lastIntent, confidence: 0.8 }
   }
   const isFallback = result.intent === 'fallback_gibberish' || result.intent === 'fallback_unclear'
   const slots = isFallback ? ctx.slots : { ...ctx.slots, ...result.entities }
@@ -471,10 +513,14 @@ export function handleMessage(raw: string, ctx: ChatContext): { reply: ReplyData
   if (/\b(mas mahal)\b/.test(result.normalized)) slots.vibe = undefined
   const enrichedResult = { ...result, entities: slots }
   const reply = buildReply(enrichedResult, { ...ctx, slots })
+  const lastIntent =
+    result.intent === 'itinerary' || result.intent === 'database_search' || result.intent === 'budget'
+      ? result.intent
+      : ctx.lastIntent
   return {
     reply,
     result: enrichedResult,
-    ctx: { fallbackCount: isFallback ? ctx.fallbackCount + 1 : 0, slots },
+    ctx: { fallbackCount: isFallback ? ctx.fallbackCount + 1 : 0, slots, lastIntent },
   }
 }
 
@@ -496,7 +542,7 @@ const welcomeMessage: Msg = {
 const SEARCH_STOPWORDS = new Set(
   ('ang ng sa na at ay mga ko mo gusto ako ikaw po ba naman lang para kay kung ito yung ' +
     'saan ano pwede puwede paki maghanap hanap hanapin recommend suggest suhestiyon ' +
-    'lugar kainan kan anan restaurant negosyo business pasyalan resort cafe kapihan malapit near the a an i for of in ' +
+    'lugar kainan kan anan restaurant negosyo business pasyalan resort cafe kapihan malapit near the a an i for of in food dining eatery bakery tourist spot things to do attraction museum park ' +
     'gusto ko sana maghanap hanapin please show find mura tipid barato cheap budget friendly family romantic pamilya mas mahal naman yung with may parking').split(' ')
 )
 
@@ -510,11 +556,12 @@ type BusinessRow = {
   price_range: string | null
   specialties: string[] | null
   cover_url: string | null
+  logo_url: string | null
   verification_status: string
 }
 
 const CATEGORY_FILTERS: Record<NonNullable<Entities['category']>, string[]> = {
-  kainan: ['food', 'restaurant', 'kainan', 'carinderia', 'eatery'],
+  kainan: ['food', 'restaurant', 'kainan', 'carinderia', 'eatery', 'bakery'],
   cafe: ['cafe', 'coffee', 'kapihan'],
   resort: ['resort', 'hotel', 'beach'],
   pasyalan: ['attraction', 'tour', 'museum', 'park', 'pasyalan'],
@@ -532,10 +579,10 @@ function safeCityFilter(value: string) {
 async function findBusinesses(entities: Entities, normalized: string, widenLocation = false, relaxPrice = false, relaxVibe = false): Promise<ChatBusinessResult[]> {
   let query = supabase
     .from('businesses')
-    .select('id, name, about, city, address, business_type, price_range, specialties, cover_url, verification_status')
+    .select('id, name, about, city, address, business_type, price_range, specialties, cover_url, logo_url, verification_status')
     .eq('live', true)
     .eq('verification_status', 'verified')
-    .limit(30)
+    .order('id')
 
   if (entities.location && !widenLocation) query = query.ilike('city', `%${safeCityFilter(entities.location)}%`)
   if (entities.category) {
@@ -549,10 +596,10 @@ async function findBusinesses(entities: Entities, normalized: string, widenLocat
   const locationWords = new Set((entities.location ?? '').split(' '))
   const categoryWords = new Set([
     ...(entities.category ? [entities.category, ...CATEGORY_FILTERS[entities.category]] : []),
-    ...(entities.category === 'kainan' ? ['kan', 'anan', 'carinderia', 'eatery'] : []),
+    ...(entities.category === 'kainan' ? ['kan', 'anan', 'carinderia', 'eatery', 'food', 'dining', 'bakery'] : []),
     ...(entities.category === 'cafe' ? ['kapihan', 'coffee'] : []),
     ...(entities.category === 'resort' ? ['hotel', 'beach', 'dagat'] : []),
-    ...(entities.category === 'pasyalan' ? ['falls', 'bundok', 'simbahan'] : []),
+    ...(entities.category === 'pasyalan' ? ['attraction', 'tourist spot', 'museum', 'park', 'falls', 'bundok', 'simbahan'] : []),
   ])
   const terms = normalized
     .split(' ')
@@ -565,33 +612,65 @@ async function findBusinesses(entities: Entities, normalized: string, widenLocat
     )
     .map(safeFilterTerm)
     .filter(Boolean)
-  for (const term of [...new Set(terms)].slice(0, 3)) {
-    query = query.or(`name.ilike.%${term}%,about.ilike.%${term}%,specialties.cs.{${term}}`)
+  const uniqueTerms = [...new Set(terms)].slice(0, 3)
+  if (widenLocation && !entities.category && !uniqueTerms.length) return []
+  const searchConditions = uniqueTerms.flatMap((term) => [
+    `name.ilike.%${term}%`,
+    `about.ilike.%${term}%`,
+    `business_type.ilike.%${term}%`,
+    `city.ilike.%${term}%`,
+    `address.ilike.%${term}%`,
+    `specialties.cs.{${term}}`,
+  ])
+  if (searchConditions.length) {
+    query = query.or(searchConditions.join(','))
   }
 
-  const { data, error } = await query
-  if (error) throw error
+  const data: BusinessRow[] = []
+  const pageSize = 100
+  for (let from = 0; ; from += pageSize) {
+    const { data: page, error } = await query.range(from, from + pageSize - 1)
+    if (error) throw error
+    const rows = (page ?? []) as BusinessRow[]
+    data.push(...rows)
+    if (rows.length < pageSize) break
+  }
 
-  return ((data ?? []) as BusinessRow[])
-    .map((business) => ({
-      kind: 'business' as const,
-      id: business.id,
-      name: business.name,
-      city: business.city,
-      address: business.address,
-      type: business.business_type,
-      priceRange: business.price_range,
-      photo: business.cover_url && /^https?:\/\//i.test(business.cover_url) ? business.cover_url : null,
-      verified: business.verification_status === 'verified',
-    }))
-    .sort((a, b) => {
-      const location = entities.location?.toLowerCase() ?? ''
-      const aExactCity = Number(a.city?.toLowerCase() === location)
-      const bExactCity = Number(b.city?.toLowerCase() === location)
-      const aType = Number(!!entities.category && a.type?.toLowerCase().includes(entities.category))
-      const bType = Number(!!entities.category && b.type?.toLowerCase().includes(entities.category))
-      return bExactCity - aExactCity || bType - aType || Number(b.verified) - Number(a.verified) || a.name.localeCompare(b.name)
-    })
+  const businesses = await Promise.all(
+    data.map(async (business) => {
+      let photo: string | null = null
+      for (const path of [business.cover_url, business.logo_url]) {
+        if (!path) continue
+        try {
+          photo = await resolveBusinessImage(path)
+          break
+        } catch (imageError) {
+          console.error(`Business image could not be loaded for ${business.id}.`, imageError)
+        }
+      }
+
+      return {
+        kind: 'business' as const,
+        id: business.id,
+        name: business.name,
+        city: business.city,
+        address: business.address,
+        type: business.business_type,
+        priceRange: business.price_range,
+        photo,
+        verified: business.verification_status === 'verified',
+      }
+    }),
+  )
+
+  return businesses.sort((a, b) => {
+    const location = entities.location?.toLowerCase() ?? ''
+    const aExactCity = Number(a.city?.toLowerCase() === location)
+    const bExactCity = Number(b.city?.toLowerCase() === location)
+    const aType = Number(!!entities.category && a.type?.toLowerCase().includes(entities.category))
+    const bType = Number(!!entities.category && b.type?.toLowerCase().includes(entities.category))
+    return bExactCity - aExactCity || bType - aType || Number(b.verified) - Number(a.verified) || a.name.localeCompare(b.name)
+  })
 }
 
 async function findItineraries(entities: Entities): Promise<ChatItineraryResult[]> {
@@ -615,6 +694,7 @@ export function JimbotScreen() {
 }
 
 export function JimbotChat({ embedded }: { embedded?: boolean }) {
+  const { t } = useLang()
   const [messages, setMessages] = useState<Msg[]>([welcomeMessage])
   const [thinking, setThinking] = useState(false)
   const [input, setInput] = useState('')
@@ -834,15 +914,20 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
         broadenedVibe = matches.length > 0
       }
 
+      const locationLabel = result.entities.location ? ` sa ${result.entities.location}` : ''
       const intro = matches.length
         ? broadenedLocation
           ? `Wala akong nahanap sa ${result.entities.location}, kaya pinalawak ko ang paghahanap sa iba pang verified na lugar.`
           : broadenedVibe
-            ? `Wala akong nahanap na lugar na may ${result.entities.vibe} tag sa ${result.entities.location}; narito ang iba pang verified na tugma.`
+            ? `Wala akong nahanap na lugar na may ${result.entities.vibe} tag${locationLabel}; narito ang iba pang verified na tugma.`
           : broadenedPrice
-            ? `Walang pasok sa price tier na ₱. Pinalawak ko ang presyo para makakita ka ng iba pang verified na lugar sa ${result.entities.location}.`
-            : `Narito ang mga verified na ${result.entities.category} sa ${result.entities.location}.`
-        : `Wala akong nahanap na verified na ${result.entities.category} sa ${result.entities.location}. Subukan ang ibang lugar o kategorya.`
+            ? `Walang pasok sa price tier na ₱. Pinalawak ko ang presyo para makakita ka ng iba pang verified na lugar${locationLabel}.`
+            : result.entities.category
+              ? `Narito ang mga verified na ${result.entities.category}${locationLabel}.`
+              : `Narito ang mga verified na negosyong may kaugnayan sa “${clean}”.`
+        : result.entities.category
+          ? `Wala akong nahanap na verified na ${result.entities.category}${locationLabel}. Subukan ang ibang lugar o kategorya.`
+          : `Wala akong nahanap na verified na negosyong tugma sa “${clean}”. Subukan ang ibang salita o lugar.`
       const groundedIntro = result.entities.budget && intent === 'database_search'
         ? `${intro} May price tier lang ang business records, hindi eksaktong presyo bawat tao; hindi ko masisiguro kung pasok sa ₱${result.entities.budget.toLocaleString()}.`
         : result.entities.people && intent === 'database_search'
@@ -934,7 +1019,14 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
               {historyLoading ? (
-                <p className="px-3 py-4 text-sm text-fg-2">Kinukuha ang mga usapan…</p>
+                <div className="space-y-2 px-2 py-3" aria-busy="true" aria-label={t('Kinukuha ang mga usapan', 'Loading conversations')}>
+                  {[0, 1, 2, 3].map((item) => (
+                    <div key={item} className="space-y-2 rounded-xl px-3 py-2.5">
+                      <Skeleton className="h-4 w-4/5" />
+                      <Skeleton className="h-3 w-1/3" />
+                    </div>
+                  ))}
+                </div>
               ) : historyError ? (
                 <p role="alert" className="px-3 py-4 text-sm text-danger">Hindi ma-load ang kasaysayan ng usapan.</p>
               ) : history.length ? (
@@ -1068,7 +1160,12 @@ function BotReply({
   onOpenResult: (result: ChatResult) => void
 }) {
   const big = msg.expression === 'unsure'
-  const [visibleResults, setVisibleResults] = useState(5)
+  const resultsTrackRef = useRef<HTMLDivElement>(null)
+  const hasCarousel = (msg.results?.length ?? 0) > 3
+  const scrollResults = (direction: -1 | 1) => {
+    const track = resultsTrackRef.current
+    if (track) track.scrollBy({ left: direction * track.clientWidth * 0.8, behavior: 'smooth' })
+  }
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex items-start gap-2">
       {big ? (
@@ -1083,14 +1180,47 @@ function BotReply({
         </div>
         {msg.results && msg.results.length > 0 && (
           <div className="space-y-2">
-            {msg.results.slice(0, visibleResults).map((result) => (
-              <ResultCard key={`${result.kind}-${result.id}`} result={result} onOpen={() => onOpenResult(result)} />
-            ))}
-            {visibleResults < msg.results.length && (
-              <button type="button" onClick={() => setVisibleResults((count) => count + 5)} className="rounded-full border border-line px-4 py-2 text-sm font-semibold text-link hover:bg-surface">
-                Ipakita pa ({msg.results.length - visibleResults})
-              </button>
+            {hasCarousel && (
+              <div className="flex items-center justify-between px-1">
+                <p className="text-xs font-semibold text-fg-2">
+                  {msg.results.length} resulta · swipe para makita lahat
+                </p>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    aria-label="Mga naunang resulta"
+                    onClick={() => scrollResults(-1)}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-line text-fg-2 transition hover:bg-surface"
+                  >
+                    <ChevronLeft size={17} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Mga susunod na resulta"
+                    onClick={() => scrollResults(1)}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-line text-fg-2 transition hover:bg-surface"
+                  >
+                    <ChevronRight size={17} />
+                  </button>
+                </div>
+              </div>
             )}
+            <div
+              ref={hasCarousel ? resultsTrackRef : undefined}
+              role={hasCarousel ? 'region' : undefined}
+              aria-label={hasCarousel ? 'Mga resulta sa carousel' : undefined}
+              tabIndex={hasCarousel ? 0 : undefined}
+              className={hasCarousel ? 'no-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2' : 'space-y-2'}
+            >
+              {msg.results.map((result) => (
+                <ResultCard
+                  key={`${result.kind}-${result.id}`}
+                  result={result}
+                  onOpen={() => onOpenResult(result)}
+                  layout={hasCarousel ? 'carousel' : 'list'}
+                />
+              ))}
+            </div>
           </div>
         )}
         {showQuickReplies && msg.quickReplies && msg.quickReplies.length > 0 && (
@@ -1124,14 +1254,37 @@ function BotReply({
   )
 }
 
-function ResultCard({ result, onOpen }: { result: ChatResult; onOpen: () => void }) {
+function ResultCard({
+  result,
+  onOpen,
+  layout = 'list',
+}: {
+  result: ChatResult
+  onOpen: () => void
+  layout?: 'list' | 'carousel'
+}) {
+  const [photoFailed, setPhotoFailed] = useState(false)
+  const carousel = layout === 'carousel'
+
   if (result.kind === 'itinerary') {
     return (
-      <button type="button" onClick={onOpen} className="card flex w-full items-center gap-3 p-3 text-left transition-colors hover:bg-surface">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+      <button
+        type="button"
+        onClick={onOpen}
+        className={cn(
+          'card text-left transition-colors hover:bg-surface',
+          carousel
+            ? 'w-[min(82vw,300px)] shrink-0 snap-start overflow-hidden rounded-[22px]'
+            : 'flex w-full items-center gap-3 rounded-[22px] p-3',
+        )}
+      >
+        <div className={cn(
+          'flex shrink-0 items-center justify-center bg-primary/15 text-primary',
+          carousel ? 'h-32 w-full' : 'h-12 w-12 rounded-xl',
+        )}>
           <MapPin size={20} />
         </div>
-        <span className="min-w-0 flex-1">
+        <span className={cn('min-w-0 flex-1', carousel && 'block p-3')}>
           <span className="block truncate font-semibold">{result.title}</span>
           <span className="block truncate text-sm text-fg-2">{[result.area, result.subtitle, `₱${result.budget.toLocaleString()}`].filter(Boolean).join(' · ')}</span>
         </span>
@@ -1140,20 +1293,59 @@ function ResultCard({ result, onOpen }: { result: ChatResult; onOpen: () => void
   }
 
   return (
-    <button type="button" onClick={onOpen} className="card flex w-full items-center gap-3 p-3 text-left transition-colors hover:bg-surface">
-      {result.photo ? (
-        <img src={result.photo} alt="" className="h-14 w-14 shrink-0 rounded-xl object-cover" loading="lazy" />
+    <button
+      type="button"
+      onClick={onOpen}
+      className={cn(
+        'card text-left transition-all hover:bg-surface',
+        carousel
+          ? 'w-[min(82vw,300px)] shrink-0 snap-start overflow-hidden rounded-[22px] hover:-translate-y-0.5'
+          : 'flex w-full items-center gap-3 rounded-[22px] p-3',
+      )}
+    >
+      {carousel ? (
+        <div className="relative h-36 w-full overflow-hidden bg-gradient-to-br from-primary/20 to-sunken">
+          {result.photo && !photoFailed ? (
+            <img
+              src={result.photo}
+              alt=""
+              className="h-full w-full object-cover"
+              loading="lazy"
+              onError={() => setPhotoFailed(true)}
+            />
+          ) : (
+            <div className="grid h-full place-items-center text-primary" aria-hidden="true">
+              <MapPin size={28} />
+            </div>
+          )}
+          {result.verified && (
+            <span className="absolute left-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-semibold text-primary shadow-sm">
+              Verified
+            </span>
+          )}
+        </div>
+      ) : result.photo && !photoFailed ? (
+        <img
+          src={result.photo}
+          alt=""
+          className="h-14 w-14 shrink-0 rounded-xl object-cover"
+          loading="lazy"
+          onError={() => setPhotoFailed(true)}
+        />
       ) : (
-        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+        <div className="grid h-14 w-14 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary" aria-hidden="true">
           <MapPin size={20} />
         </div>
       )}
-      <span className="min-w-0 flex-1">
+      <span className={cn('min-w-0 flex-1', carousel && 'block p-3')}>
         <span className="block truncate font-semibold">{result.name}</span>
         <span className="block truncate text-sm text-fg-2">{[result.type, result.city, result.priceRange].filter(Boolean).join(' · ')}</span>
         {result.address && <span className="block truncate text-xs text-fg-2">{result.address}</span>}
+        {carousel && <span className="mt-2 block text-xs font-semibold text-link">Tingnan ang profile →</span>}
       </span>
-      <span className="shrink-0 rounded-full bg-primary/15 px-2 py-1 text-[11px] font-semibold text-primary">Verified</span>
+      {!carousel && result.verified && (
+        <span className="shrink-0 rounded-full bg-primary/15 px-2 py-1 text-[11px] font-semibold text-primary">Verified</span>
+      )}
     </button>
   )
 }

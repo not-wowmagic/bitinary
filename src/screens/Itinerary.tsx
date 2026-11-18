@@ -13,6 +13,8 @@ import { ProgressRing } from '@/components/ui/Charts'
 import { CautionPill, ClosingPill, Pill, VerifiedPill } from '@/components/ui/Pill'
 import { PhaseTag } from '@/components/ui/PhaseTag'
 import { Sheet } from '@/components/ui/Sheet'
+import { Skeleton } from '@/components/ui/Skeleton'
+import { useLang } from '@/app/i18n'
 import { itineraryById, stopsTotal, type Stop } from '@/data/itineraries'
 import { placeById } from '@/data/places'
 import { cn } from '@/lib/cn'
@@ -30,6 +32,7 @@ type SavedItineraryStop = { id: string; business_id: string | null; stop_time: s
 
 function SavedItineraryDetail({ id }: { id: string }) {
   const navigate = useNavigate()
+  const { t } = useLang()
   const [itinerary, setItinerary] = useState<SavedItinerary | null>(null)
   const [stops, setStops] = useState<SavedItineraryStop[]>([])
   const [loading, setLoading] = useState(true)
@@ -75,7 +78,18 @@ function SavedItineraryDetail({ id }: { id: string }) {
     }
   }, [id])
 
-  if (loading) return <p className="mx-auto max-w-[760px] px-4 py-10 text-fg-2">Kinukuha ang naka-save na itinerary…</p>
+  if (loading) {
+    return (
+      <main className="mx-auto max-w-[760px] space-y-4 px-4 py-8" aria-busy="true" aria-label={t('Kinukuha ang naka-save na itinerary', 'Loading saved itinerary')}>
+        <Skeleton className="h-5 w-48" />
+        <Skeleton className="h-9 w-3/4" />
+        <Skeleton className="h-14 w-full rounded-2xl" />
+        {[0, 1, 2, 3].map((item) => (
+          <Skeleton key={item} className="h-20 w-full rounded-[18px]" />
+        ))}
+      </main>
+    )
+  }
   if (failed || !itinerary) {
     return (
       <StateView

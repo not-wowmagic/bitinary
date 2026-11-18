@@ -59,10 +59,11 @@ export function PersonalizeHub() {
     return () => clearTimeout(tm)
   }, [thanks, setParams])
 
-  const exit = () => {
+  const exit = async () => {
     if (from !== 'prefs' && session?.kind === 'user') {
       if (Object.keys(prefs.status).length === 0) {
-        setPrefs((current) => skipAllTravelerPreferences(current))
+        const result = await setPrefs((current) => skipAllTravelerPreferences(current))
+        if (result.error) return
       }
       setSetupDone(true)
       setResume(null)

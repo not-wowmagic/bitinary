@@ -93,7 +93,7 @@ export function Overview() {
   const unanswered = d.reviews.filter((r) => !r.reply && !r.caseId)
   const newComments = d.comments.filter((c) => c.fresh && !c.reply && !c.hidden)
   const openCases = d.cases.filter((c) => c.status === 'review' || c.status === 'info' || c.status === 'received')
-  const name = d.profile.nickname || d.profile.name.split(' ')[0] || 'Ben'
+  const name = d.profile.nickname || d.profile.name.split(' ')[0] || 'Business'
 
   const tips = useMemo(() => {
     const list: { pose: 'idea'; text: string; cta: string; to: string }[] = []

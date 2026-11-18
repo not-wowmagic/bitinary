@@ -11,6 +11,7 @@ import { relTime } from '../format'
 import type { Comment } from '../seed'
 import { useBiz } from '../store'
 import { Avatar, Card, PageHeader, Pill, StateBlock } from '../ui'
+import { BusinessAssetImage } from '../ui/BusinessAssetImage'
 import { ContentTabs } from './Posts'
 
 type Filter = 'all' | 'new' | 'needs' | 'hidden' | 'reported'
@@ -193,7 +194,7 @@ export function Comments() {
           groups.map((p) => (
             <Card key={p.id} className="p-0 md:p-0">
               <div className="flex items-center gap-3 border-b border-line p-4">
-                <img src={p.media[0]} alt="" className="h-12 w-12 rounded-[12px] object-cover" />
+                <BusinessAssetImage src={p.media[0]} alt="" className="h-12 w-12 rounded-[12px] object-cover" />
                 <p className="line-clamp-2 flex-1 font-display text-[15px] font-semibold">{p.title ?? p.text}</p>
                 <Pill>{list.filter((c) => c.postId === p.id).length}</Pill>
               </div>

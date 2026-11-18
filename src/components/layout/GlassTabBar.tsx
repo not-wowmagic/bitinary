@@ -9,11 +9,11 @@ export function GlassTabBar({ tone = 'default' }: { tone?: 'default' | 'dark' })
   const { t } = useLang()
   const label = (to: string) => {
     const labels: Record<string, [string, string]> = {
-      '/': ['Home', 'Home'],
+      '/': ['Tahanan', 'Home'],
       '/jimbot': ['Jimbot', 'Jimbot'],
       '/search': ['Hanap', 'Search'],
       '/moments': ['Moments', 'Moments'],
-      '/account': ['Account', 'Account'],
+      '/account': ['Aking Account', 'Account'],
     }
     return t(...labels[to])
   }

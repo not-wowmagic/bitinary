@@ -78,13 +78,13 @@ export type Notif = { id: string; en: string; tl: string; at: string; to: string
 
 export const demoBusiness: BusinessProfile = {
   ...emptyBusiness,
-  name: 'Kainan ni Mang Ben',
+  name: 'Business',
   type: 'kainan',
   price: '₱₱',
   address: '1247 M.H. del Pilar St., Ermita',
   city: 'Maynila',
   pin: { lng: 120.9842, lat: 14.5995 },
-  contactName: 'Ben Dizon',
+  contactName: 'Business',
   mobile: '9171234500',
   landline: '(02) 8521 4410',
   menu: [
@@ -100,7 +100,7 @@ export const demoBusiness: BusinessProfile = {
   about: 'Lutong-bahay since 1998. Kare-kare na may sariling bagoong, at halo-halo na paborito ng Ermita.',
   specialties: ['Kare-kare', 'Halo-halo'],
   languages: ['Tagalog', 'English'],
-  links: { facebook: 'facebook.com/kainanmangben', instagram: '@kainanmangben', tiktok: '', website: '' },
+  links: { facebook: 'facebook.com/business', instagram: '@business', tiktok: '', website: '' },
   goals: ['customers', 'deals'],
   verification: { method: 'upload', files: ['DTI-registration.pdf'], status: 'pending' },
   status: { basics: 'done', location: 'done', hours: 'done', contact: 'done', menu: 'done', photos: 'done', about: 'done', online: 'done', goals: 'done' },
@@ -173,7 +173,7 @@ export const seedCases: Case[] = [
 ]
 
 export const seedDeals: Deal[] = [
-  { id: 'd1', kind: 'b1t1', item: 'Tapsilog', start: ahead(2 * D).slice(0, 10), end: ahead(30 * D).slice(0, 10), from: '17:00', to: '20:00', limitPerDay: 30, limitTotal: 300, redemption: 'qr', code: 'BEN-B1T1', status: 'scheduled', redeemed: { qr: 0, code: 0 }, views: 0 },
+  { id: 'd1', kind: 'b1t1', item: 'Tapsilog', start: ahead(2 * D).slice(0, 10), end: ahead(30 * D).slice(0, 10), from: '17:00', to: '20:00', limitPerDay: 30, limitTotal: 300, redemption: 'qr', code: 'BIZ-B1T1', status: 'scheduled', redeemed: { qr: 0, code: 0 }, views: 0 },
   { id: 'd0', kind: 'discount', item: 'Kare-kare', percent: 10, minSpend: 500, start: ago(30 * D).slice(0, 10), end: ago(2 * D).slice(0, 10), from: '10:00', to: '21:00', limitPerDay: 20, limitTotal: 200, redemption: 'code', code: 'KARE10', status: 'ended', redeemed: { qr: 38, code: 46 }, views: 1820 },
 ]
 
@@ -184,7 +184,7 @@ export const seedBranches: Branch[] = [
   { id: 'br2', name: 'Maginhawa', area: 'Quezon City' },
 ]
 export const seedStaff: Staff[] = [
-  { id: 's1', name: 'Ben Dizon', email: 'ben@kainanmangben.ph', role: 'owner', status: 'active', branch: 'br1' },
+  { id: 's1', name: 'Business', email: 'business@example.com', role: 'owner', status: 'active', branch: 'br1' },
   { id: 's2', name: 'Liza Ramos', email: 'liza.r@gmail.com', role: 'manager', status: 'active', branch: 'br1' },
   { id: 's3', name: 'Jun Santos', email: 'jun.santos@gmail.com', role: 'staff', status: 'active', branch: 'br2' },
   { id: 's4', name: 'Mae Cruz', email: 'mae.cruz@yahoo.com', role: 'staff', status: 'invited', branch: 'br2' },

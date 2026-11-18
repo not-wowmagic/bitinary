@@ -2,6 +2,7 @@ import { ChevronDown, ChevronUp, Plus } from 'lucide-react'
 import { animate, motion, useMotionValue, type PanInfo } from 'motion/react'
 import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router'
+import { useLang } from '@/app/i18n'
 import { Polaroid, PolaroidSkeleton } from '@/components/cards/Polaroid'
 import { Jimbot } from '@/components/mascot/Jimbot'
 import { Button } from '@/components/ui/Button'
@@ -15,6 +16,7 @@ export type GalleryFilter = 'all' | 'mine' | 'trips'
 type Props = {
   title: string
   moments: Moment[]
+  dateLocale?: string
   filter: GalleryFilter
   setFilter: (f: GalleryFilter) => void
   loading?: boolean
@@ -23,26 +25,28 @@ type Props = {
 
 function Header({ title, count, compact }: { title: string; count: number; compact?: boolean }) {
   const navigate = useNavigate()
+  const { t } = useLang()
   return (
     <div className="flex items-center justify-between gap-3 px-4">
       <div className="min-w-0">
         <h2 className={cn('truncate font-display font-semibold leading-tight', compact ? 'text-[18px]' : 'text-[20px]')}>{title}</h2>
-        <p className="text-caption text-fg-2">{count} larawan sa nakikitang mapa</p>
+        <p className="text-caption text-fg-2">{t(`${count} larawan sa nakikitang mapa`, `${count} ${count === 1 ? 'photo' : 'photos'} in the visible map area`)}</p>
       </div>
       <Button size="sm" className="!px-3 text-[13px]" icon={<Plus size={15} />} onClick={() => navigate('/moments/create')}>
-        Gumawa ng Moment
+        {t('Gumawa ng Moment', 'Create Moment')}
       </Button>
     </div>
   )
 }
 
 function Filters({ filter, setFilter }: Pick<Props, 'filter' | 'setFilter'>) {
+  const { t } = useLang()
   return (
     <div className="no-scrollbar flex gap-2 overflow-x-auto px-4">
       {([
-        ['all', 'Lahat'],
-        ['mine', 'Akin'],
-        ['trips', 'Mga Trip'],
+        ['all', t('Lahat', 'All')],
+        ['mine', t('Akin', 'Mine')],
+        ['trips', t('Mga Biyahe', 'Trips')],
       ] as const).map(([v, l]) => (
         <Chip key={v} active={filter === v} onClick={() => setFilter(v)}>
           {l}
@@ -53,18 +57,19 @@ function Filters({ filter, setFilter }: Pick<Props, 'filter' | 'setFilter'>) {
 }
 
 function Empty() {
+  const { t } = useLang()
   return (
     <div className="flex flex-col items-center px-6 py-4 text-center">
       <Jimbot expression="sleeping" variant="standalone" size={90} />
-      <p className="mt-2 text-body text-fg-2">Walang larawan sa bahaging ito ng mapa. I-drag ang mapa o kunan ang una!</p>
+      <p className="mt-2 text-body text-fg-2">{t('Walang larawan sa bahaging ito ng mapa. I-drag ang mapa o kunan ang una!', 'No photos in this part of the map. Drag the map or capture your first one!')}</p>
     </div>
   )
 }
 
-function Row({ moments, loading, onOpen }: Pick<Props, 'moments' | 'loading' | 'onOpen'>) {
+function Row({ moments, loading, onOpen, dateLocale }: Pick<Props, 'moments' | 'loading' | 'onOpen' | 'dateLocale'>) {
   if (loading)
     return (
-      <div className="flex gap-4 overflow-hidden px-5 py-3">
+      <div className="flex gap-4 overflow-hidden px-5 py-3" aria-busy="true">
         {[-3, 2, -2].map((t, i) => (
           <PolaroidSkeleton key={i} width={140} tilt={t} />
         ))}
@@ -75,17 +80,17 @@ function Row({ moments, loading, onOpen }: Pick<Props, 'moments' | 'loading' | '
     <div className="no-scrollbar flex snap-x gap-4 overflow-x-auto px-5 pb-4 pt-3">
       {moments.map((m) => (
         <div key={m.id} className="snap-start">
-          <Polaroid src={m.src} caption={m.caption} date={m.date} frame={m.frame} tilt={m.tilt} width={140} onClick={() => onOpen(m)} />
+          <Polaroid src={m.src} caption={m.caption} date={m.date} dateLocale={dateLocale} frame={m.frame} tilt={m.tilt} width={140} onClick={() => onOpen(m)} />
         </div>
       ))}
     </div>
   )
 }
 
-function Masonry({ moments, loading, onOpen, cols = 2 }: Pick<Props, 'moments' | 'loading' | 'onOpen'> & { cols?: number }) {
+function Masonry({ moments, loading, onOpen, dateLocale, cols = 2 }: Pick<Props, 'moments' | 'loading' | 'onOpen' | 'dateLocale'> & { cols?: number }) {
   if (loading)
     return (
-      <div className="grid grid-cols-2 gap-4 px-4 py-3">
+      <div className="grid grid-cols-2 gap-4 px-4 py-3" aria-busy="true">
         {[-2, 3, 2, -3].map((t, i) => (
           <PolaroidSkeleton key={i} width="100%" tilt={t} />
         ))}
@@ -100,7 +105,7 @@ function Masonry({ moments, loading, onOpen, cols = 2 }: Pick<Props, 'moments' |
       {columns.map((col, ci) => (
         <div key={ci} className={cn('flex min-w-0 flex-1 flex-col gap-5', ci % 2 === 1 && 'pt-6')}>
           {col.map((m) => (
-            <Polaroid key={m.id} src={m.src} caption={m.caption} date={m.date} frame={m.frame} tilt={m.tilt * 0.7} width="100%" onClick={() => onOpen(m)} />
+            <Polaroid key={m.id} src={m.src} caption={m.caption} date={m.date} dateLocale={dateLocale} frame={m.frame} tilt={m.tilt * 0.7} width="100%" onClick={() => onOpen(m)} />
           ))}
         </div>
       ))}
@@ -110,6 +115,7 @@ function Masonry({ moments, loading, onOpen, cols = 2 }: Pick<Props, 'moments' |
 
 /** Mobile: floating glass bottom sheet with peek / half / full snap heights. */
 export function GallerySheet({ snap, setSnap, containerH, bottomOffset, ...p }: Props & { snap: Snap; setSnap: (s: Snap) => void; containerH: number; bottomOffset: number }) {
+  const { t } = useLang()
   const heights: Record<Snap, number> = {
     closed: 0,
     peek: 112,
@@ -139,7 +145,7 @@ export function GallerySheet({ snap, setSnap, containerH, bottomOffset, ...p }: 
   return (
     <motion.section
       data-map-ui
-      aria-label="Gallery ng Moments"
+      aria-label={t('Gallery ng Moments', 'Moments gallery')}
       initial={{ y: 40, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       style={{ height: h, bottom: bottomOffset }}
@@ -171,6 +177,7 @@ export function GallerySheet({ snap, setSnap, containerH, bottomOffset, ...p }: 
 
 /** Tablet / desktop: floating docked panel with collapse button. */
 export function GalleryDock({ collapsed, setCollapsed, ...p }: Props & { collapsed: boolean; setCollapsed: (v: boolean) => void }) {
+  const { t } = useLang()
   if (collapsed) {
     return (
       <button
@@ -178,12 +185,12 @@ export function GalleryDock({ collapsed, setCollapsed, ...p }: Props & { collaps
         onClick={() => setCollapsed(false)}
         className="glass absolute right-4 top-4 z-30 flex h-12 items-center gap-2 rounded-full pl-4 pr-3 font-display text-[14px] font-semibold shadow-float"
       >
-        {p.title} · {p.moments.length} larawan <ChevronDown size={18} />
+        {p.title} · {t(`${p.moments.length} larawan`, `${p.moments.length} ${p.moments.length === 1 ? 'photo' : 'photos'}`)} <ChevronDown size={18} />
       </button>
     )
   }
   return (
-    <section data-map-ui aria-label="Gallery ng Moments" className="glass absolute bottom-4 right-4 top-4 z-30 flex w-[360px] flex-col overflow-hidden rounded-[28px] shadow-float">
+    <section data-map-ui aria-label={t('Gallery ng Moments', 'Moments gallery')} className="glass absolute bottom-4 right-4 top-4 z-30 flex w-[360px] flex-col overflow-hidden rounded-[28px] shadow-float">
       <div className="flex shrink-0 items-start gap-2 pb-3 pt-4">
         <div className="min-w-0 flex-1">
           <Header title={p.title} count={p.moments.length} />
@@ -193,7 +200,7 @@ export function GalleryDock({ collapsed, setCollapsed, ...p }: Props & { collaps
         <div className="min-w-0 flex-1">
           <Filters filter={p.filter} setFilter={p.setFilter} />
         </div>
-        <button onClick={() => setCollapsed(true)} aria-label="I-collapse ang gallery" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sunken text-fg-2 dark:bg-elevated">
+        <button onClick={() => setCollapsed(true)} aria-label={t('I-collapse ang gallery', 'Collapse gallery')} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sunken text-fg-2 dark:bg-elevated">
           <ChevronUp size={18} />
         </button>
       </div>

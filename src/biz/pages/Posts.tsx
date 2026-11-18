@@ -9,6 +9,7 @@ import { WD, longDate, num, time12 } from '../format'
 import type { Post } from '../seed'
 import { useBiz } from '../store'
 import { Card, PageHeader, Pill, StateBlock, SubTabs } from '../ui'
+import { BusinessAssetImage } from '../ui/BusinessAssetImage'
 
 export function ContentTabs() {
   const { t, d } = useBiz()
@@ -35,7 +36,7 @@ function PostRow({ p, onDelete }: { p: Post; onDelete: () => void }) {
   return (
     <li className="relative flex gap-3 p-3 md:gap-4 md:p-4">
       <button onClick={() => navigate(`/biz/content/edit/${p.id}`)} className="relative h-24 w-20 shrink-0 overflow-hidden rounded-[14px] bg-sunken md:h-28 md:w-24" aria-label={t('I-edit', 'Edit')}>
-        {p.media[0] && <img src={p.media[0]} alt="" className="h-full w-full object-cover" />}
+        {p.media[0] && <BusinessAssetImage src={p.media[0]} alt="" className="h-full w-full object-cover" />}
         {p.type === 'reel' && <Clapperboard size={18} className="absolute bottom-1.5 left-1.5 text-white drop-shadow" />}
       </button>
       <div className="min-w-0 flex-1">

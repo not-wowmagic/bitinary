@@ -13,6 +13,7 @@ import { stats, type Boost, type Deal, type DealKind } from '../seed'
 import { useBiz } from '../store'
 import { Card, LockedFeature, Pill } from '../ui'
 import { SubPage } from './Account'
+import { BusinessAssetImage } from '../ui/BusinessAssetImage'
 
 const field = cn(inputBase, 'border-line')
 
@@ -142,7 +143,7 @@ export function DealsPage() {
   const [open, setOpen] = useState(!!newKind)
   const [done, setDone] = useState(false)
   const today = new Date().toISOString().slice(0, 10)
-  const [f, setF] = useState<Omit<Deal, 'id' | 'status' | 'redeemed' | 'views'>>({ kind: newKind ?? 'b1t1', item: 'Tapsilog', percent: 10, minSpend: 500, addon: 'Iced tea', start: today, end: new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10), from: '17:00', to: '20:00', limitPerDay: 30, limitTotal: 300, redemption: 'qr', code: 'BEN-B1T1' })
+  const [f, setF] = useState<Omit<Deal, 'id' | 'status' | 'redeemed' | 'views'>>({ kind: newKind ?? 'b1t1', item: 'Tapsilog', percent: 10, minSpend: 500, addon: 'Iced tea', start: today, end: new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10), from: '17:00', to: '20:00', limitPerDay: 30, limitTotal: 300, redemption: 'qr', code: 'BIZ-B1T1' })
   if (!verified)
     return (
       <SubPage title="Deals" phase="P2">
@@ -200,7 +201,7 @@ export function DealsPage() {
             <div className="space-y-4">
               <div className="grid gap-2 sm:grid-cols-3">
                 {templates.map(([k, n, s, ic]) => (
-                  <button key={k} onClick={() => setF({ ...f, kind: k, code: k === 'b1t1' ? 'BEN-B1T1' : k === 'discount' ? 'BEN10' : 'BENFREE' })} aria-pressed={f.kind === k} className={cn('rounded-[16px] border-2 p-3 text-left', f.kind === k ? 'border-primary bg-primary/10' : 'border-line')}>
+                  <button key={k} onClick={() => setF({ ...f, kind: k, code: k === 'b1t1' ? 'BIZ-B1T1' : k === 'discount' ? 'BIZ10' : 'BIZFREE' })} aria-pressed={f.kind === k} className={cn('rounded-[16px] border-2 p-3 text-left', f.kind === k ? 'border-primary bg-primary/10' : 'border-line')}>
                     <span className="text-link">{ic}</span>
                     <span className="mt-1 block font-display text-[15px] font-semibold">{n}</span>
                     <span className="text-[13px] text-fg-2">{s}</span>
@@ -304,7 +305,7 @@ export function BoostPage() {
               <div className="grid gap-2 sm:grid-cols-3">
                 {published.map((p) => (
                   <button key={p.id} onClick={() => setPostId(p.id)} aria-pressed={postId === p.id} className={cn('flex items-center gap-2 rounded-[14px] border-2 p-2 text-left', postId === p.id ? 'border-primary bg-primary/10' : 'border-line')}>
-                    <img src={p.media[0]} alt="" className="h-12 w-12 rounded-[10px] object-cover" />
+                    <BusinessAssetImage src={p.media[0]} alt="" className="h-12 w-12 rounded-[10px] object-cover" />
                     <span className="line-clamp-2 text-[14px]">{p.title ?? p.text}</span>
                   </button>
                 ))}

@@ -46,6 +46,7 @@ import { formatPH, validPH, PhFlag } from "@/screens/signup/Signup"
 import { longDate } from "../format"
 import { useBiz, useBusiness } from "../store"
 import { BizStatusChip, Card, PageHeader, Pill } from "../ui"
+import { BusinessAssetImage } from "../ui/BusinessAssetImage"
 import { StatsTabs } from "./Overview"
 
 type SectionId = BizThemeId
@@ -466,7 +467,7 @@ export function Backgrounds() {
                 <Field label="Cover">
                   <label className="relative flex aspect-[16/9] cursor-pointer items-center justify-center overflow-hidden rounded-[18px] border-2 border-dashed border-line bg-sunken dark:bg-elevated">
                     {x.cover ? (
-                      <img
+                      <BusinessAssetImage
                         src={x.cover}
                         alt=""
                         className="h-full w-full object-cover"
@@ -500,7 +501,7 @@ export function Backgrounds() {
                         key={i}
                         className="relative aspect-square overflow-hidden rounded-[12px]"
                       >
-                        <img
+                        <BusinessAssetImage
                           src={p}
                           alt=""
                           className="h-full w-full object-cover"

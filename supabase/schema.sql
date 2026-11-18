@@ -202,6 +202,7 @@ create table if not exists public.businesses (
   specialties text[] not null default '{}',
   languages text[] not null default '{Tagalog}',
   goals text[] not null default '{}',
+  logo_url text,
   cover_url text,
   links jsonb not null default '{"facebook":"","instagram":"","tiktok":"","website":""}'::jsonb,
   live boolean not null default false,
@@ -217,6 +218,7 @@ create table if not exists public.businesses (
   updated_at timestamptz not null default timezone('utc', now())
 );
 alter table public.businesses add column if not exists verification_data jsonb not null default '{}'::jsonb;
+alter table public.businesses add column if not exists logo_url text;
 
 alter table public.businesses
   add column if not exists setup_status jsonb not null default '{}'::jsonb;
@@ -297,6 +299,54 @@ create table if not exists public.comments (
   blocked boolean not null default false,
   created_at timestamptz not null default timezone('utc', now())
 );
+
+create table if not exists public.post_likes (
+  post_id uuid not null references public.posts(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default timezone('utc', now()),
+  primary key (post_id, user_id)
+);
+
+create or replace function public.update_post_social_counts()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  target_post_id uuid;
+begin
+  if tg_table_name = 'post_likes' then
+    target_post_id := case when tg_op = 'DELETE' then old.post_id else new.post_id end;
+    update public.posts
+    set likes = greatest(0, likes + case when tg_op = 'DELETE' then -1 else 1 end)
+    where id = target_post_id;
+  else
+    target_post_id := case when tg_op = 'DELETE' then old.post_id else new.post_id end;
+    update public.posts
+    set comments_count = greatest(
+      0,
+      comments_count + case when tg_op = 'DELETE' then -1 else 1 end
+    )
+    where id = target_post_id;
+  end if;
+
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists post_likes_update_social_counts on public.post_likes;
+create trigger post_likes_update_social_counts
+after insert or delete on public.post_likes
+for each row execute function public.update_post_social_counts();
+
+drop trigger if exists comments_update_social_counts on public.comments;
+create trigger comments_update_social_counts
+after insert or delete on public.comments
+for each row execute function public.update_post_social_counts();
 
 create table if not exists public.reviews (
   id uuid primary key default gen_random_uuid(),
@@ -474,6 +524,70 @@ create table if not exists public.business_daily_stats (
   primary key (business_id, stat_date)
 );
 
+create table if not exists public.business_profile_viewers_daily (
+  business_id uuid not null references public.businesses(id) on delete cascade,
+  viewer_id uuid not null references public.profiles(id) on delete cascade,
+  viewed_on date not null,
+  created_at timestamptz not null default timezone('utc', now()),
+  primary key (business_id, viewer_id, viewed_on)
+);
+
+alter table public.business_profile_viewers_daily enable row level security;
+revoke all on table public.business_profile_viewers_daily from anon, authenticated;
+
+create or replace function public.track_business_profile_view(p_business_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_viewer_id uuid := auth.uid();
+  v_viewed_on date := (timezone('utc', now()))::date;
+  v_inserted_count integer;
+begin
+  if v_viewer_id is null then
+    return false;
+  end if;
+
+  if not exists (
+    select 1 from public.profiles p
+    where p.id = v_viewer_id and p.role = 'traveler'
+  ) then
+    return false;
+  end if;
+
+  if not exists (
+    select 1 from public.businesses b
+    where b.id = p_business_id
+      and b.live = true
+      and b.verification_status = 'verified'
+      and b.owner_id <> v_viewer_id
+  ) then
+    return false;
+  end if;
+
+  insert into public.business_profile_viewers_daily (business_id, viewer_id, viewed_on)
+  values (p_business_id, v_viewer_id, v_viewed_on)
+  on conflict do nothing;
+
+  get diagnostics v_inserted_count = row_count;
+  if v_inserted_count = 0 then
+    return false;
+  end if;
+
+  insert into public.business_daily_stats (business_id, stat_date, views)
+  values (p_business_id, v_viewed_on, 1)
+  on conflict (business_id, stat_date)
+  do update set views = public.business_daily_stats.views + 1;
+
+  return true;
+end;
+$$;
+
+revoke all on function public.track_business_profile_view(uuid) from public, anon;
+grant execute on function public.track_business_profile_view(uuid) to authenticated;
+
 create table if not exists public.itineraries (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
@@ -645,6 +759,7 @@ alter table public.branches enable row level security;
 alter table public.business_staff enable row level security;
 alter table public.posts enable row level security;
 alter table public.comments enable row level security;
+alter table public.post_likes enable row level security;
 alter table public.reviews enable row level security;
 alter table public.review_cases enable row level security;
 alter table public.deals enable row level security;
@@ -700,13 +815,31 @@ revoke all on function public.track_dev_console_banner_event(text, text) from pu
 grant execute on function public.track_dev_console_banner_event(text, text) to anon, authenticated;
 
 do $$
+declare
+  table_name text;
 begin
-  if not exists (
-    select 1 from pg_publication_tables
-    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'dev_console_state'
-  ) then
-    alter publication supabase_realtime add table public.dev_console_state;
-  end if;
+  foreach table_name in array array[
+    'dev_console_state',
+    'businesses',
+    'business_hours',
+    'menu_items',
+    'business_photos',
+    'posts',
+    'comments',
+    'post_likes',
+    'reviews',
+    'business_daily_stats'
+  ]
+  loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = table_name
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', table_name);
+    end if;
+  end loop;
 end $$;
 
 do $$
@@ -754,6 +887,9 @@ begin
     ['Owners moderate comments', 'public.comments'],
     ['Developers view all comments', 'public.comments'],
     ['Developers moderate comments', 'public.comments'],
+    ['Users view own post likes', 'public.post_likes'],
+    ['Users create post likes', 'public.post_likes'],
+    ['Users delete own post likes', 'public.post_likes'],
     ['Owners manage review cases', 'public.review_cases'],
     ['Public can view active deals', 'public.deals'],
     ['Owners manage deals', 'public.deals'],
@@ -896,9 +1032,21 @@ for select to authenticated using (public.is_dev_console_admin());
 create policy "Developers moderate reviews" on public.reviews
 for update to authenticated using (public.is_dev_console_admin()) with check (public.is_dev_console_admin());
 create policy "Users create reviews" on public.reviews
-for insert with check (author_id = auth.uid());
+for insert with check (
+  author_id = auth.uid()
+  and exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.role = 'traveler'
+  )
+);
 create policy "Authors update reviews" on public.reviews
-for update using (author_id = auth.uid()) with check (author_id = auth.uid());
+for update using (author_id = auth.uid()) with check (
+  author_id = auth.uid()
+  and exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.role = 'traveler'
+  )
+);
 create policy "Owners manage review replies" on public.reviews
 for update using (exists (
   select 1 from public.businesses b where b.id = business_id and b.owner_id = auth.uid()
@@ -906,7 +1054,28 @@ for update using (exists (
   select 1 from public.businesses b where b.id = business_id and b.owner_id = auth.uid()
 ));
 create policy "Users create comments" on public.comments
-for insert with check (author_id = auth.uid());
+for insert to authenticated with check (
+  author_id = auth.uid()
+  and hidden = false
+  and blocked = false
+  and reply is null
+  and length(trim(body)) between 1 and 2000
+  and exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.role = 'traveler'
+  )
+  and exists (
+    select 1
+    from public.posts post
+    join public.businesses b on b.id = post.business_id
+    where post.id = comments.post_id
+      and post.status = 'published'
+      and b.live = true
+      and b.verification_status = 'verified'
+  )
+);
+grant select on public.comments to anon, authenticated;
+grant insert, update on public.comments to authenticated;
 create policy "Public can view visible comments" on public.comments
 for select using (hidden = false);
 create policy "Developers view all comments" on public.comments
@@ -923,6 +1092,30 @@ for update using (exists (
   join public.businesses b on b.id = p.business_id
   where p.id = post_id and b.owner_id = auth.uid()
 ));
+
+revoke all on public.post_likes from public, anon, authenticated;
+grant select, insert, delete on public.post_likes to authenticated;
+create policy "Users view own post likes" on public.post_likes
+for select to authenticated using (user_id = auth.uid());
+create policy "Users create post likes" on public.post_likes
+for insert to authenticated with check (
+  user_id = auth.uid()
+  and exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.role = 'traveler'
+  )
+  and exists (
+    select 1
+    from public.posts post
+    join public.businesses b on b.id = post.business_id
+    where post.id = post_likes.post_id
+      and post.status = 'published'
+      and b.live = true
+      and b.verification_status = 'verified'
+  )
+);
+create policy "Users delete own post likes" on public.post_likes
+for delete to authenticated using (user_id = auth.uid());
 
 create policy "Owners manage review cases" on public.review_cases
 for all using (exists (
@@ -1069,6 +1262,68 @@ on storage.objects for delete to authenticated
 using (
   bucket_id = 'videos'
   and (storage.foldername(name))[1] = (select auth.uid()::text)
+);
+
+drop policy if exists "Travelers view live business images" on storage.objects;
+create policy "Travelers view live business images"
+on storage.objects for select to anon, authenticated
+using (
+  bucket_id = 'images'
+  and exists (
+    select 1
+    from public.businesses b
+    where b.live = true
+      and b.verification_status = 'verified'
+      and (
+        (
+          (storage.foldername(name))[1] = b.owner_id::text
+          and (storage.foldername(name))[2] = 'business'
+        )
+        or (
+          (storage.foldername(name))[1] = 'business'
+          and (storage.foldername(name))[2] in (b.id::text, b.owner_id::text)
+        )
+      )
+      and (
+        b.logo_url = storage.objects.name
+        or
+        b.cover_url = storage.objects.name
+        or exists (
+          select 1 from public.business_photos photo
+          where photo.business_id = b.id and photo.storage_path = storage.objects.name
+        )
+        or exists (
+          select 1 from public.posts post
+          where post.business_id = b.id
+            and post.status = 'published'
+            and storage.objects.name = any(post.media_urls)
+        )
+        or exists (
+          select 1 from public.reviews review
+          where review.business_id = b.id
+            and review.hidden = false
+            and storage.objects.name = any(review.photo_urls)
+        )
+      )
+  )
+);
+
+drop policy if exists "Travelers view live business videos" on storage.objects;
+create policy "Travelers view live business videos"
+on storage.objects for select to anon, authenticated
+using (
+  bucket_id = 'videos'
+  and (storage.foldername(name))[2] = 'business'
+  and exists (
+    select 1
+    from public.posts post
+    join public.businesses b on b.id = post.business_id
+    where b.owner_id::text = (storage.foldername(name))[1]
+      and b.live = true
+      and b.verification_status = 'verified'
+      and post.status = 'published'
+      and post.video_url = storage.objects.name
+  )
 );
 
 drop policy if exists "Developers manage console banner assets" on storage.objects;

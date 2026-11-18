@@ -7,6 +7,7 @@ import { ThemeProvider } from '@/app/theme'
 import { ConsoleProvider } from '@/app/console'
 import { SocialProvider } from '@/app/social'
 
+// Panatilihin ang provider order: ginagamit ng AccountProvider ang traveler Store.
 export default function App() {
   return (
     <ThemeProvider>

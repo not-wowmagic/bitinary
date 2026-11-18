@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { useAccount } from '@/app/account'
+import { useLang } from '@/app/i18n'
 import { useStore } from '@/app/store'
 import { BizLogo, ReelMedia } from '@/components/cards/ReelCard'
 import { BackButton } from '@/components/layout/TopBar'
@@ -12,6 +13,7 @@ import { OfflineState, StateView } from '@/components/states/States'
 import { PhaseTag } from '@/components/ui/PhaseTag'
 import { SponsoredTag, VerifiedPill } from '@/components/ui/Pill'
 import { Sheet } from '@/components/ui/Sheet'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { placeById } from '@/data/places'
 import { reelComments, reels, type Reel } from '@/data/reels'
 import { cn } from '@/lib/cn'
@@ -157,6 +159,7 @@ function ReelSlide({
 }) {
   const place = placeById(reel.placeId)!
   const navigate = useNavigate()
+  const { t } = useLang()
   const { dataSaver, subtitles, saved, toggleSaved, addStop, showToast } = useStore()
   const { requireAccount } = useAccount()
   const [liked, setLiked] = useState(false)
@@ -202,9 +205,9 @@ function ReelSlide({
             </motion.span>
           )}
           {buffering && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="glass-dark absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center rounded-[28px] px-6 py-4">
-              <Jimbot expression="thinking" crop="head" size={64} />
-              <span className="mt-2 font-display text-[14px] font-medium">Naglo-load…</span>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 grid place-items-center bg-black/50" aria-busy="true">
+              <Skeleton className="absolute inset-0 rounded-none bg-white/10" />
+              <span className="glass-dark relative rounded-full px-4 py-2 font-display text-[14px] font-medium">{t('Naglo-load…', 'Loading…')}</span>
             </motion.div>
           )}
         </AnimatePresence>

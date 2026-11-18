@@ -37,6 +37,7 @@ export function InstallBanner() {
               onClick={async () => {
                 if (canPrompt) {
                   if (await install()) setInstallDismissed(true)
+                  else setHowTo(true)
                 } else setHowTo(true)
               }}
             >
@@ -48,34 +49,37 @@ export function InstallBanner() {
           </motion.div>
         )}
       </AnimatePresence>
-      <Sheet open={howTo} onClose={() => setHowTo(false)} title="Idagdag sa Home Screen">
+      <Sheet open={howTo} onClose={() => setHowTo(false)} title={t('Idagdag sa Home Screen', 'Install Bitinary')}>
         <ol className="space-y-3 text-body">
           {isIOS ? (
             <>
               <li className="flex items-center gap-3">
                 <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunken"><Share size={20} /></span>
-                I-tap ang <b>Share</b> sa ibaba ng Safari.
+                {t('I-tap ang Share sa ibaba ng Safari.', 'In Safari, tap Share at the bottom of the screen.')}
               </li>
               <li className="flex items-center gap-3">
                 <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunken"><SquarePlus size={20} /></span>
-                Piliin ang <b>Add to Home Screen</b>.
+                {t('Piliin ang Add to Home Screen.', 'Choose Add to Home Screen.')}
               </li>
             </>
           ) : (
             <>
               <li className="flex items-center gap-3">
                 <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunken font-display font-bold">⋮</span>
-                Buksan ang menu ng browser.
+                {t('Buksan ang menu ng browser.', 'Open your browser menu.')}
               </li>
               <li className="flex items-center gap-3">
                 <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunken"><Download size={20} /></span>
-                Piliin ang <b>Install app</b> o <b>Add to Home screen</b>.
+                {t('Piliin ang Install app o Add to Home screen.', 'Choose Install app or Add to Home screen.')}
               </li>
             </>
           )}
         </ol>
+        <p className="mt-4 text-caption text-fg-2">
+          {t('Kung walang opsyong i-install, buksan ang Bitinary sa Safari o Chrome.', 'If you do not see an install option, open Bitinary in Safari or Chrome.')}
+        </p>
         <Button block className="mt-5" onClick={() => setHowTo(false)}>
-          Sige
+          {t('Sige', 'Got it')}
         </Button>
       </Sheet>
     </>

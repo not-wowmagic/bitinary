@@ -14,6 +14,7 @@ import { stats, type Case, type CaseStatus, type Review } from '../seed'
 import { REPORT_LIMIT, useBiz } from '../store'
 import { Card, CaseChip, PageHeader, Pill, StateBlock } from '../ui'
 import { ContentTabs } from './Posts'
+import { BusinessAssetImage } from '../ui/BusinessAssetImage'
 
 type Filter = 'all' | 'new' | 'needs' | 'low' | 'photos' | 'reported'
 
@@ -52,7 +53,7 @@ function ReviewRow({ r }: { r: Review }) {
           {r.photos.length > 0 && (
             <div className="mt-2 flex gap-1.5">
               {r.photos.map((p) => (
-                <img key={p} src={p} alt="" className="h-14 w-14 rounded-[10px] object-cover" />
+                <BusinessAssetImage key={p} src={p} alt="" className="h-14 w-14 rounded-[10px] object-cover" />
               ))}
             </div>
           )}
@@ -181,7 +182,7 @@ export function ReviewDetail() {
             {r.photos.length > 0 && (
               <div className="mt-3 flex gap-2">
                 {r.photos.map((p) => (
-                  <img key={p} src={p} alt="" className="h-24 w-24 rounded-[14px] object-cover" />
+                  <BusinessAssetImage key={p} src={p} alt="" className="h-24 w-24 rounded-[14px] object-cover" />
                 ))}
               </div>
             )}

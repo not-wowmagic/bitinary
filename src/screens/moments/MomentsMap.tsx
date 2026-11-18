@@ -6,6 +6,7 @@ import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
+import { useLang } from '@/app/i18n'
 import { useStore } from '@/app/store'
 import { Polaroid } from '@/components/cards/Polaroid'
 import { FULL_BLEED } from '@/components/layout/nav'
@@ -19,7 +20,6 @@ import { Sheet } from '@/components/ui/Sheet'
 import type { Moment } from '@/data/moments'
 import { cn } from '@/lib/cn'
 import { getForcedState } from '@/lib/forced'
-import { shortDate } from '@/lib/format'
 import { useBreakpoint } from '@/lib/useMedia'
 import { useOnline } from '@/lib/useOnline'
 import { supabase } from '@/lib/supabase'
@@ -32,6 +32,7 @@ type MapFilter = 'all' | 'food' | 'place' | 'mine' | 'today' | 'week' | 'month' 
 type MomentRecord = Moment & { latitude: number; longitude: number; authorId: string | null }
 
 function MapLibreSurface({ moments, onSelect }: { moments: MomentRecord[]; onSelect: (id: string) => void }) {
+  const { lang, t } = useLang()
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MapLibreMapInstance | null>(null)
   const markersRef = useRef<maplibregl.Marker[]>([])
@@ -46,6 +47,11 @@ function MapLibreSurface({ moments, onSelect }: { moments: MomentRecord[]; onSel
       container: containerRef.current,
       center: [120.9842, 14.5995],
       zoom: 12.5,
+      locale: {
+        'NavigationControl.ZoomIn': t('Mag-zoom in', 'Zoom in'),
+        'NavigationControl.ZoomOut': t('Mag-zoom out', 'Zoom out'),
+        'NavigationControl.ResetBearing': t('I-reset ang direksyon', 'Reset bearing'),
+      },
       style: {
         version: 8,
         sources: {
@@ -95,7 +101,7 @@ function MapLibreSurface({ moments, onSelect }: { moments: MomentRecord[]; onSel
       map.remove()
       mapRef.current = null
     }
-  }, [])
+  }, [lang, t])
 
   useEffect(() => {
     const map = mapRef.current
@@ -128,7 +134,7 @@ function MapLibreSurface({ moments, onSelect }: { moments: MomentRecord[]; onSel
     }
   }, [moments, onSelect])
 
-  return <div ref={containerRef} className="absolute inset-0" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} aria-label="OpenStreetMap ng Moments" />
+  return <div ref={containerRef} className="absolute inset-0" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} aria-label={t('OpenStreetMap ng Moments', 'OpenStreetMap Moments map')} />
 }
 
 export function MomentsMap() {
@@ -137,6 +143,7 @@ export function MomentsMap() {
   const online = useOnline()
   const bp = useBreakpoint()
   const navigate = useNavigate()
+  const { lang, t } = useLang()
   const { removeMoment, showToast } = useStore()
   const [size, setSize] = useState({ w: 0, h: 0 })
   const pz = usePanZoom({ x: 0, y: 0, s: 1, r: 0 })
@@ -152,6 +159,7 @@ export function MomentsMap() {
   const [query, setQuery] = useState('')
   const [viewer, setViewer] = useState<Moment | null>(null)
   const [dbMoments, setDbMoments] = useState<MomentRecord[]>([])
+  const [loadingMoments, setLoadingMoments] = useState(true)
 
   const mobile = bp === 'mobile'
   const tabBar = mobile ? 88 : 0
@@ -168,34 +176,57 @@ export function MomentsMap() {
   useEffect(() => {
     let active = true
     const loadMoments = async () => {
-      const { data: userData } = await supabase.auth.getUser()
-      const { data, error } = await supabase.from('moments').select('id, author_id, storage_path, caption, visited_at, place_name, area, latitude, longitude, kind, trip, frame, tilt, on_map').eq('on_map', true).order('created_at', { ascending: false })
-      if (error || !active) return
-      const rows: MomentRecord[] = []
-      for (const row of data ?? []) {
-        if (row.latitude == null || row.longitude == null) continue
-        const src = row.storage_path.startsWith('http') ? row.storage_path : (await supabase.storage.from('images').createSignedUrl(row.storage_path, 3600)).data?.signedUrl
-        if (!src) continue
-        rows.push({
-          id: String(row.id),
-          src,
-          caption: row.caption ?? '',
-          date: row.visited_at ?? '',
-          place: row.place_name ?? '',
-          area: row.area ?? '',
-          map: DEFAULT_USER,
-          kind: row.kind && (row.kind.toLowerCase().includes('pagkain') || row.kind.toLowerCase().includes('food')) ? 'Pagkain' : 'Pasyalan',
-          mine: row.author_id === userData.user?.id,
-          trip: row.trip ?? undefined,
-          frame: (row.frame ?? 'classic') as Moment['frame'],
-          tilt: Number(row.tilt ?? 0),
-          onMap: Boolean(row.on_map),
-          latitude: Number(row.latitude),
-          longitude: Number(row.longitude),
-          authorId: row.author_id ?? null,
+      // Private ang image bucket, kaya signed URL ang kailangan bago ipakita ang Moment sa mapa.
+      try {
+        const { data: userData, error: userError } = await supabase.auth.getUser()
+        if (userError) throw userError
+        const { data, error } = await supabase.from('moments').select('id, author_id, storage_path, caption, visited_at, place_name, area, latitude, longitude, kind, trip, frame, tilt, on_map').eq('on_map', true).order('created_at', { ascending: false })
+        if (error) throw error
+        if (!active) return
+        const rows: MomentRecord[] = []
+        for (const row of data ?? []) {
+          if (row.latitude == null || row.longitude == null) continue
+          let src = row.storage_path.startsWith('http') ? row.storage_path : undefined
+          if (!src) {
+            const { data: signed, error: signError } = await supabase.storage.from('images').createSignedUrl(row.storage_path, 3600)
+            if (signError) {
+              console.error('Moment image could not be loaded.', { path: row.storage_path, error: signError })
+              continue
+            }
+            src = signed?.signedUrl
+          }
+          if (!src) continue
+          rows.push({
+            id: String(row.id),
+            src,
+            caption: row.caption ?? '',
+            date: row.visited_at ?? '',
+            place: row.place_name ?? '',
+            area: row.area ?? '',
+            map: DEFAULT_USER,
+            kind: row.kind && (row.kind.toLowerCase().includes('pagkain') || row.kind.toLowerCase().includes('food')) ? 'Pagkain' : 'Pasyalan',
+            mine: row.author_id === userData.user?.id,
+            trip: row.trip ?? undefined,
+            frame: (row.frame ?? 'classic') as Moment['frame'],
+            tilt: Number(row.tilt ?? 0),
+            onMap: Boolean(row.on_map),
+            latitude: Number(row.latitude),
+            longitude: Number(row.longitude),
+            authorId: row.author_id ?? null,
+          })
+        }
+        if (active) setDbMoments(rows)
+      } catch (error) {
+        console.error('Moments could not be loaded.', error)
+        if (active) showToast({
+          text: error instanceof Error
+            ? t(`Hindi ma-load ang Moments: ${error.message}`, `Moments could not be loaded: ${error.message}`)
+            : t('Hindi ma-load ang Moments.', 'Moments could not be loaded.'),
+          expression: 'unsure',
         })
+      } finally {
+        if (active) setLoadingMoments(false)
       }
-      if (active) setDbMoments(rows)
     }
     void loadMoments()
     return () => {
@@ -211,6 +242,7 @@ export function MomentsMap() {
   }, [size.w])
 
   const all = useMemo(() => (forced === 'empty' ? [] : dbMoments), [dbMoments, forced])
+  const momentsLoading = forced === 'loading' || loadingMoments
   const now = new Date()
   const shown = all.filter((m) => {
     const age = now.getTime() - new Date(m.date).getTime()
@@ -242,6 +274,10 @@ export function MomentsMap() {
 
   const visible = shown
   const area = { name: 'Manila', x: DEFAULT_USER.x, y: DEFAULT_USER.y, total: all.length }
+  const viewerDate = viewer?.date ? new Date(viewer.date) : null
+  const formattedViewerDate = viewerDate && !Number.isNaN(viewerDate.getTime())
+    ? new Intl.DateTimeFormat(lang === 'en' ? 'en-PH' : 'fil-PH', { month: 'short', day: 'numeric', year: 'numeric' }).format(viewerDate)
+    : null
   const selectedCluster = selected ? { items: shown.filter((moment) => moment.id === selected) } : undefined
   const galleryItems = [...(selectedCluster?.items ?? []), ...visible.filter((m) => !selectedCluster?.items.includes(m))].filter((m) =>
     galleryFilter === 'mine' ? m.mine : galleryFilter === 'trips' ? !!m.trip : true,
@@ -249,20 +285,20 @@ export function MomentsMap() {
   const searchTargets: { label: string; sub: string; x: number; y: number }[] = []
 
   const deleteMoment = async (moment: Moment) => {
-    if (!window.confirm('I-delete ang Moment na ito? Hindi na ito mababawi.')) return
+    if (!window.confirm(t('I-delete ang Moment na ito? Hindi na ito mababawi.', 'Delete this Moment? This cannot be undone.'))) return
     const { data: row, error: lookupError } = await supabase.from('moments').select('storage_path').eq('id', moment.id).maybeSingle()
     if (lookupError) {
-      showToast({ text: `Hindi ma-delete ang Moment: ${lookupError.message}`, expression: 'unsure' })
+      showToast({ text: t(`Hindi ma-delete ang Moment: ${lookupError.message}`, `Could not delete the Moment: ${lookupError.message}`), expression: 'unsure' })
       return
     }
     const { error } = await supabase.from('moments').delete().eq('id', moment.id)
     if (error) {
-      showToast({ text: `Hindi ma-delete ang Moment: ${error.message}`, expression: 'unsure' })
+      showToast({ text: t(`Hindi ma-delete ang Moment: ${error.message}`, `Could not delete the Moment: ${error.message}`), expression: 'unsure' })
       return
     }
     if (row?.storage_path && !row.storage_path.startsWith('http')) {
       const { error: storageError } = await supabase.storage.from('images').remove([row.storage_path])
-      if (storageError) showToast({ text: `Na-delete ang Moment pero naiwan ang image file: ${storageError.message}`, expression: 'unsure' })
+      if (storageError) showToast({ text: t(`Na-delete ang Moment pero naiwan ang image file: ${storageError.message}`, `The Moment was deleted, but its image file could not be removed: ${storageError.message}`), expression: 'unsure' })
     }
     removeMoment(moment.id)
     setViewer(null)
@@ -272,7 +308,7 @@ export function MomentsMap() {
   return (
     <main className={cn(FULL_BLEED, 'overflow-hidden bg-[var(--map-land)]')}>
       {/* map surface */}
-      <div ref={pz.ref} className="absolute inset-0 touch-none select-none" style={{ cursor: 'grab' }} aria-label="Mapa ng Moments. I-drag para gumalaw, i-pinch para mag-zoom." role="application">
+      <div ref={pz.ref} className="absolute inset-0 touch-none select-none" style={{ cursor: 'grab' }} aria-label={t('Mapa ng Moments. I-drag para gumalaw, i-pinch para mag-zoom.', 'Moments map. Drag to move and pinch to zoom.')} role="application">
         <MapLibreSurface
           moments={shown}
           onSelect={(id) => {
@@ -287,7 +323,7 @@ export function MomentsMap() {
       <div className={cn('pointer-events-none absolute top-0 z-20 space-y-2.5 px-3 pt-[max(12px,env(safe-area-inset-top))]', mobile ? 'inset-x-0' : 'left-0 right-[392px]')}>
         <div className="flex items-center justify-center gap-2">
           <div className="pointer-events-auto" data-map-ui>
-            <Segmented tone="glass" label="Moments mode" value="map" onChange={(v) => v === 'camera' && navigate('/moments')} options={[{ value: 'camera', label: 'Camera' }, { value: 'map', label: 'Mapa' }]} />
+            <Segmented tone="glass" label={t('Mode ng Moments', 'Moments mode')} value="map" onChange={(v) => v === 'camera' && navigate('/moments')} options={[{ value: 'camera', label: t('Camera', 'Camera') }, { value: 'map', label: t('Mapa', 'Map') }]} />
           </div>
           <PhaseTag phase="P3" />
         </div>
@@ -296,8 +332,8 @@ export function MomentsMap() {
             <div className="glass overflow-hidden rounded-[22px] shadow-float">
               <div className="flex h-12 items-center gap-2 px-3.5">
                 <Search size={19} className="text-link" />
-                <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Hanapin ang lugar sa mapa" className="h-full flex-1 bg-transparent text-[16px] text-fg outline-none placeholder:text-fg-2" aria-label="Hanapin sa mapa" />
-                <button aria-label="Isara" onClick={() => (setSearching(false), setQuery(''))} className="flex h-9 w-9 items-center justify-center rounded-full text-fg-2">
+                <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('Hanapin ang lugar sa mapa', 'Search places on the map')} className="h-full flex-1 bg-transparent text-[16px] text-fg outline-none placeholder:text-fg-2" aria-label={t('Hanapin sa mapa', 'Search the map')} />
+                <button aria-label={t('Isara', 'Close')} onClick={() => (setSearching(false), setQuery(''))} className="flex h-9 w-9 items-center justify-center rounded-full text-fg-2">
                   <X size={18} />
                 </button>
               </div>
@@ -323,20 +359,20 @@ export function MomentsMap() {
           ) : (
             <button onClick={() => setSearching(true)} className="glass flex h-12 w-full items-center gap-2 rounded-full px-4 text-left shadow-float">
               <Search size={19} className="text-link" />
-              <span className="text-[16px] text-fg-2">Hanapin sa mapa</span>
+              <span className="text-[16px] text-fg-2">{t('Hanapin sa mapa', 'Search the map')}</span>
             </button>
           )}
         </div>
         <div className="no-scrollbar pointer-events-auto mx-auto flex max-w-[520px] gap-2 overflow-x-auto pb-2" data-map-ui>
           {([
-            ['all', 'Lahat'],
-            ['food', 'Pagkain'],
-            ['place', 'Pasyalan'],
-            ['mine', 'Akin'],
-            ['today', 'Ngayon'],
-            ['week', '7 araw'],
-            ['month', '30 araw'],
-            ['older', 'Mas luma'],
+            ['all', t('Lahat', 'All')],
+            ['food', t('Pagkain', 'Food')],
+            ['place', t('Pasyalan', 'Places')],
+            ['mine', t('Akin', 'Mine')],
+            ['today', t('Ngayon', 'Today')],
+            ['week', t('7 araw', '7 days')],
+            ['month', t('30 araw', '30 days')],
+            ['older', t('Mas luma', 'Older')],
           ] as const).map(([v, l]) => (
             <Chip key={v} tone="glass" active={mapFilter === v} onClick={() => setMapFilter(v)}>
               {l}
@@ -352,7 +388,7 @@ export function MomentsMap() {
         data-map-ui
       >
         {Math.abs(pz.view.r % 360) > 1 && (
-          <button aria-label="I-reset ang direksyon" onClick={() => pz.flyTo({ ...pz.view, r: 0 }, 400)} className="glass flex h-12 w-12 items-center justify-center rounded-full shadow-float">
+          <button aria-label={t('I-reset ang direksyon', 'Reset map direction')} onClick={() => pz.flyTo({ ...pz.view, r: 0 }, 400)} className="glass flex h-12 w-12 items-center justify-center rounded-full shadow-float">
             <Compass size={22} style={{ transform: `rotate(${pz.view.r}deg)` }} />
           </button>
         )}
@@ -365,23 +401,23 @@ export function MomentsMap() {
             <Jimbot expression="sleeping" variant="standalone" size={56} />
             <p className="flex-1 text-[14px] font-semibold text-fg">
               <WifiOff size={15} className="mr-1 inline text-caution" />
-              Offline ka. Naka-cache na mapa at mga Moment mo lang ang makikita.
+              {t('Offline ka. Naka-cache na mapa at mga Moment mo lang ang makikita.', 'You are offline. Only the cached map and your Moments are available.')}
             </p>
           </motion.div>
         )}
-        {online && !shown.length && (
+        {online && !shown.length && !momentsLoading && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass absolute left-1/2 top-1/2 z-20 flex w-[min(88%,360px)] -translate-x-1/2 -translate-y-1/2 flex-col items-center rounded-[28px] p-5 text-center shadow-float" data-map-ui>
             <Jimbot expression="sleeping" variant="standalone" size={110} />
-            <p className="mt-2 text-h3 text-fg">Wala pang Moments dito</p>
-            <p className="mt-1 text-[15px] text-fg-2">Kunan ang unang larawan mo at lalabas ito sa mapa.</p>
+            <p className="mt-2 text-h3 text-fg">{t('Wala pang Moments dito', 'No Moments here yet')}</p>
+            <p className="mt-1 text-[15px] text-fg-2">{t('Kunan ang unang larawan mo at lalabas ito sa mapa.', 'Capture your first photo and it will appear on the map.')}</p>
             <Button className="mt-4" onClick={() => navigate('/moments')}>
-              Buksan ang camera
+              {t('Buksan ang camera', 'Open camera')}
             </Button>
           </motion.div>
         )}
         {online && !!shown.length && mobile && snap === 'closed' && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="glass absolute left-3 right-[72px] z-20 flex h-11 w-fit max-w-[calc(100%-84px)] items-center gap-2 truncate rounded-full pl-1.5 pr-4 font-display text-[13px] font-medium text-fg shadow-float" style={{ bottom: tabBar + 14 }} data-map-ui>
-            <Jimbot crop="head" size={32} expression="pointing" animate={false} /> I-tap ang pin para sa mga larawan
+            <Jimbot crop="head" size={32} expression="pointing" animate={false} /> {t('I-tap ang pin para sa mga larawan', 'Tap a pin to view photos')}
           </motion.div>
         )}
       </AnimatePresence>
@@ -395,26 +431,28 @@ export function MomentsMap() {
           bottomOffset={tabBar}
           title={area.name}
           moments={galleryItems}
+          dateLocale={lang === 'en' ? 'en-PH' : 'fil-PH'}
           filter={galleryFilter}
           setFilter={setGalleryFilter}
-          loading={forced === 'loading'}
+          loading={momentsLoading}
           onOpen={setViewer}
         />
       ) : (
-        <GalleryDock collapsed={docked} setCollapsed={setDocked} title={area.name} moments={galleryItems} filter={galleryFilter} setFilter={setGalleryFilter} loading={forced === 'loading'} onOpen={setViewer} />
+        <GalleryDock collapsed={docked} setCollapsed={setDocked} title={area.name} moments={galleryItems} dateLocale={lang === 'en' ? 'en-PH' : 'fil-PH'} filter={galleryFilter} setFilter={setGalleryFilter} loading={momentsLoading} onOpen={setViewer} />
       )}
 
       {/* moment viewer */}
       <Sheet open={!!viewer} onClose={() => setViewer(null)} title={viewer?.place}>
         {viewer && (
           <div className="flex flex-col items-center pb-2 pt-2">
-            <Polaroid src={viewer.src} caption={viewer.caption} date={viewer.date} place={viewer.place} frame={viewer.frame} tilt={viewer.tilt} width={260} />
+            <Polaroid src={viewer.src} caption={viewer.caption} date={viewer.date} dateLocale={lang === 'en' ? 'en-PH' : 'fil-PH'} place={viewer.place} frame={viewer.frame} tilt={viewer.tilt} width={260} />
             <p className="mt-5 text-caption text-fg-2">
-              {viewer.mine ? 'Pribado · ikaw lang ang nakakakita' : 'Ibinahagi ng biyahero'} · {shortDate(viewer.date)}
+              {viewer.mine ? t('Pribado · ikaw lang ang nakakakita', 'Private · only you can see this') : t('Ibinahagi ng biyahero', 'Shared by a traveler')}
+              {formattedViewerDate && ` · ${formattedViewerDate}`}
             </p>
             {viewer.mine && (
-              <button onClick={() => void deleteMoment(viewer)} className="mt-4 inline-flex items-center gap-2 rounded-full px-4 py-2 text-[14px] font-semibold text-danger hover:bg-danger-bg" aria-label="I-delete ang Moment">
-                <Trash2 size={16} /> I-delete ang image
+              <button onClick={() => void deleteMoment(viewer)} className="mt-4 inline-flex items-center gap-2 rounded-full px-4 py-2 text-[14px] font-semibold text-danger hover:bg-danger-bg" aria-label={t('I-delete ang Moment', 'Delete Moment')}>
+                <Trash2 size={16} /> {t('I-delete ang larawan', 'Delete photo')}
               </button>
             )}
           </div>

@@ -75,6 +75,7 @@ function RouteErrorFallback() {
   )
 }
 
+// Dito ang source of truth ng URL paths at pag-group ng traveler, business, at dev screens.
 export const router = createBrowserRouter(
   [
     {
@@ -106,7 +107,7 @@ export const router = createBrowserRouter(
       ],
     },
     {
-      // Bitinary Business: a separate, business-only app with its own sign-in, shell and data.
+      // Hiwalay ang Business app: sarili nito ang sign-in, shell, at workspace data.
       path: '/biz',
       Component: BizRoot,
       errorElement: <RouteErrorFallback />,

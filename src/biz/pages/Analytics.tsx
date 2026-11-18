@@ -15,6 +15,7 @@ import { useBiz } from '../store'
 import { Card, Delta, Pill, StateBlock } from '../ui'
 import { PageHeader } from '../ui'
 import { StatsTabs, sum } from './Overview'
+import { BusinessAssetImage } from '../ui/BusinessAssetImage'
 
 type Range = 'day' | 'week' | 'month'
 type Metric = 'views' | 'saves' | 'trips' | 'checkins'
@@ -253,7 +254,7 @@ export function Analytics() {
                   .filter((p) => p.status === 'published')
                   .map((p) => (
                     <li key={p.id} className="flex items-center gap-3 py-2.5">
-                      <img src={p.media[0]} alt="" className="h-12 w-12 rounded-[12px] object-cover" />
+                      <BusinessAssetImage src={p.media[0]} alt="" className="h-12 w-12 rounded-[12px] object-cover" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[15px] font-semibold">{p.title ?? p.text}</p>
                         <p className="text-[13px] text-fg-2">

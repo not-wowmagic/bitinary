@@ -1,4 +1,4 @@
-import { Bell, Heart, MapPin, Search as SearchIcon } from 'lucide-react'
+import { Bell, ChevronRight, Heart, MapPin, Search as SearchIcon } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
@@ -10,6 +10,7 @@ import { CategoryTile, categories } from '@/components/cards/CategoryTile'
 import { InstallBanner, OfflineBanner } from '@/components/layout/Banners'
 import { Jimbot } from '@/components/mascot/Jimbot'
 import { Sheet } from '@/components/ui/Sheet'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { supabase } from '@/lib/supabase'
 import { distanceInKm, formatDistance } from '@/lib/geo'
 
@@ -249,6 +250,7 @@ type NearbyBusiness = {
 
 function NearbyBusinesses() {
   const { t } = useLang()
+  const navigate = useNavigate()
   const [position, setPosition] = useState<{ latitude: number; longitude: number } | null>(null)
   const [businesses, setBusinesses] = useState<NearbyBusiness[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'denied' | 'error'>('loading')
@@ -273,6 +275,7 @@ function NearbyBusinesses() {
         .from('businesses')
         .select('id, name, business_type, address, city, latitude, longitude')
         .eq('live', true)
+        .eq('verification_status', 'verified')
         .not('latitude', 'is', null)
         .not('longitude', 'is', null)
       if (!active) return
@@ -309,20 +312,42 @@ function NearbyBusinesses() {
         </div>
         <MapPin size={20} className="text-link" />
       </div>
-      {status === 'loading' && <p className="rounded-2xl bg-surface p-5 text-body text-fg-2 shadow-card dark:bg-elevated">{t('Kinukuha ang iyong lokasyon…', 'Getting your location…')}</p>}
+      {status === 'loading' && (
+        <div className="grid gap-3 md:grid-cols-2" role="status" aria-busy="true" aria-label={t('Kinukuha ang iyong lokasyon', 'Getting your location')}>
+          {[0, 1].map((item) => (
+            <div key={item} className="flex items-center gap-3 rounded-2xl bg-surface p-3 shadow-card dark:bg-elevated">
+              <Skeleton className="h-20 w-20 shrink-0 rounded-[14px]" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-2/3" />
+                <Skeleton className="h-3 w-1/2" />
+                <Skeleton className="h-3 w-3/4" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {status === 'denied' && <p className="rounded-2xl bg-surface p-5 text-body text-fg-2 shadow-card dark:bg-elevated">{t('Payagan ang pag-access sa lokasyon upang makita ang pinakamalapit na kainan.', 'Allow location access to see the nearest dining places.')}</p>}
       {status === 'error' && <p className="rounded-2xl bg-surface p-5 text-body text-fg-2 shadow-card dark:bg-elevated">{t('Hindi makuha ang mga kainan mula sa database.', 'Could not load dining places from the database.')}</p>}
       {status === 'ready' && !businesses.length && <p className="rounded-2xl bg-surface p-5 text-body text-fg-2 shadow-card dark:bg-elevated">{t('Wala pang nailathalang kainan na may lokasyon.', 'No published dining places with locations yet.')}</p>}
       {businesses.length > 0 && (
         <div className="grid gap-3 md:grid-cols-2">
           {businesses.map((business) => (
-            <article key={business.id} className="rounded-2xl bg-surface p-4 shadow-card dark:bg-elevated">
-              <h3 className="font-display text-[16px] font-semibold">{business.name}</h3>
-              <p className="mt-1 text-caption text-fg-2">{business.business_type || t('Kainan', 'Dining')} · {business.address || business.city || t('Hindi available ang lokasyon', 'Location unavailable')}</p>
-              <p className="mt-2 flex items-center gap-1 text-caption font-semibold text-link">
-                <MapPin size={14} /> {formatDistance(business.distanceKm)} {t('ang layo', 'away')}
-              </p>
-            </article>
+            <button
+              key={business.id}
+              type="button"
+              onClick={() => navigate(`/shop/${business.id}`)}
+              aria-label={t(`Tingnan ang profile ng ${business.name}`, `View ${business.name} profile`)}
+              className="group rounded-2xl bg-surface p-4 text-left shadow-card transition hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link dark:bg-elevated"
+            >
+              <span className="flex items-center justify-between gap-3">
+                <span className="font-display text-[16px] font-semibold">{business.name}</span>
+                <ChevronRight size={18} className="shrink-0 text-fg-2 transition group-hover:translate-x-0.5 group-hover:text-link" />
+              </span>
+              <span className="mt-1 block text-caption text-fg-2">{business.business_type || t('Kainan', 'Dining')} · {business.address || business.city || t('Hindi available ang lokasyon', 'Location unavailable')}</span>
+              <span className="mt-2 flex items-center gap-1 text-caption font-semibold text-link">
+                <MapPin size={14} /> {formatDistance(business.distanceKm)} {t('ang layo', 'away')} · {t('Tingnan ang profile', 'View profile')}
+              </span>
+            </button>
           ))}
         </div>
       )}

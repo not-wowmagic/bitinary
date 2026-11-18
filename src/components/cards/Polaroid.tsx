@@ -16,6 +16,7 @@ export function Polaroid({
   caption,
   date,
   place,
+  dateLocale,
   frame = 'classic',
   tilt = 0,
   width = 160,
@@ -27,6 +28,7 @@ export function Polaroid({
   caption?: string
   date?: string
   place?: string
+  dateLocale?: string
   frame?: MomentFrame
   tilt?: number
   width?: number | string
@@ -36,6 +38,12 @@ export function Polaroid({
 }) {
   const f = frameStyles[frame]
   const isFilm = frame === 'film'
+  const parsedDate = date ? new Date(date) : null
+  const displayDate = parsedDate && !Number.isNaN(parsedDate.getTime())
+    ? dateLocale
+      ? new Intl.DateTimeFormat(dateLocale, { month: 'short', day: 'numeric', year: 'numeric' }).format(parsedDate)
+      : shortDate(parsedDate)
+    : undefined
   return (
     <motion.figure
       onClick={onClick}
@@ -69,9 +77,9 @@ export function Polaroid({
       </div>
       <figcaption className="flex min-h-[24%] flex-col justify-center px-[2%] py-[5%]" style={{ color: f.ink }}>
         {caption && <span className="line-clamp-1 font-hand text-[clamp(13px,10.5cqw,26px)] leading-tight">{caption}</span>}
-        {(date || place) && (
+        {(displayDate || place) && (
           <span className="line-clamp-1 font-hand text-[clamp(11px,7.5cqw,17px)] leading-tight opacity-75">
-            {[date && shortDate(date), place].filter(Boolean).join(' · ')}
+            {[displayDate, place].filter(Boolean).join(' · ')}
           </span>
         )}
       </figcaption>

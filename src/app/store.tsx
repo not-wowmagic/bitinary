@@ -37,6 +37,7 @@ type Store = {
 }
 
 const Ctx = createContext<Store | null>(null)
+// Limitado ang local Moments list para hindi lumaki nang walang hanggan ang browser storage.
 const MAX_MOMENTS = 20
 
 export function StoreProvider({ children }: { children: ReactNode }) {

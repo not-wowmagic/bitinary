@@ -57,7 +57,7 @@ export function useCamera() {
     }
   }, [torch, torchSupported])
 
-  /** Square crop of the current frame as a compressed JPEG data URL. */
+  /** Kinukuha ang square crop ng frame bilang compressed JPEG data URL. */
   const capture = useCallback((filter = 'none'): string | null => {
     const v = videoRef.current
     if (!v || !v.videoWidth) return null
@@ -74,7 +74,7 @@ export function useCamera() {
     return c.toDataURL('image/jpeg', 0.72)
   }, [facing])
 
-  // attach the stream once the <video> is mounted (it may render after permission is granted)
+  // Ikabit ang stream kapag naka-mount na ang <video>, kahit huli itong na-render matapos ang permission.
   useEffect(() => {
     const v = videoRef.current
     if (status === 'live' && v && streamRef.current && v.srcObject !== streamRef.current) {

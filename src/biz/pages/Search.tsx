@@ -1,4 +1,4 @@
-import { ArrowLeft, BadgeCheck, BookOpen, CalendarDays, ChevronRight, Clock, MessageCircle, Search as SearchGlyph, Star, Tag, X } from 'lucide-react'
+import { ArrowLeft, BadgeCheck, BookOpen, CalendarDays, ChevronRight, Clock, MapPin, MessageCircle, Search as SearchGlyph, Star, Store, Tag, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { Button } from '@/components/ui/Button'
@@ -162,34 +162,57 @@ export function BizSearch() {
               </ul>
             )}
             {scope === 'biz' && (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[560px] text-left text-[15px]">
-                  <thead className="text-[13px] text-fg-2">
-                    <tr className="border-b border-line">
-                      <th className="px-4 py-3 font-medium">{t('Pangalan', 'Name')}</th>
-                      <th className="px-2 py-3 font-medium">{t('Kategorya', 'Category')}</th>
-                      <th className="px-2 py-3 font-medium">{t('Lugar', 'Area')}</th>
-                      <th className="px-2 py-3 font-medium">{t('Presyo', 'Price')}</th>
-                      <th className="px-4 py-3 font-medium">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {bizRows.map((x) => (
-                      <tr key={x.id} onClick={() => navigate(`/biz/search/business/${x.id}`)} className="cursor-pointer border-b border-line last:border-0 hover:bg-sunken/60">
-                        <td className="px-4 py-3 font-semibold">
-                          <button className="text-left" onClick={() => navigate(`/biz/search/business/${x.id}`)}>
+              <ul className="grid gap-3 p-3 sm:grid-cols-2 md:p-4 xl:grid-cols-3">
+                {bizRows.map((x) => (
+                  <li key={x.id}>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/biz/search/business/${x.id}`)}
+                      className="group flex min-h-[148px] w-full items-start gap-3 rounded-[18px] border border-line bg-surface p-4 text-left shadow-card transition hover:-translate-y-0.5 hover:border-primary hover:shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary dark:bg-elevated"
+                    >
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] bg-primary/10 text-link">
+                        <Store size={21} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-start justify-between gap-2">
+                          <span className="line-clamp-2 font-display text-[15px] font-semibold leading-snug text-fg">
                             {x.name}
-                          </button>
-                        </td>
-                        <td className="px-2 py-3">{label(bizTypeOpts, x.type, lang)}</td>
-                        <td className="px-2 py-3">{x.area}</td>
-                        <td className="px-2 py-3 font-display">{x.price}</td>
-                        <td className="px-4 py-3">{x.verified ? <Pill tone="ok">{t('Na-verify', 'Verified')}</Pill> : <Pill tone="caution">{t('Hindi pa na-verify', 'Not yet verified')}</Pill>}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                          </span>
+                          <ChevronRight
+                            size={17}
+                            className="mt-0.5 shrink-0 text-muted transition group-hover:translate-x-0.5 group-hover:text-link"
+                          />
+                        </span>
+                        <span className="mt-1 block truncate text-[13px] text-fg-2">
+                          {label(bizTypeOpts, x.type, lang)}
+                          <span aria-hidden> · </span>
+                          <span className="font-display font-semibold text-fg">
+                            {x.price}
+                          </span>
+                        </span>
+                        <span className="mt-1.5 flex items-center gap-1.5 truncate text-[13px] text-fg-2">
+                          <MapPin size={14} className="shrink-0 text-link" />
+                          {x.area}
+                        </span>
+                        <span className="mt-3 block">
+                          {x.verified ? (
+                            <Pill tone="ok">
+                              <span className="inline-flex items-center gap-1">
+                                <BadgeCheck size={13} />
+                                {t('Na-verify', 'Verified')}
+                              </span>
+                            </Pill>
+                          ) : (
+                            <Pill tone="caution">
+                              {t('Hindi pa na-verify', 'Not yet verified')}
+                            </Pill>
+                          )}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
             {scope === 'programs' && (
               <ul className="divide-y divide-line">

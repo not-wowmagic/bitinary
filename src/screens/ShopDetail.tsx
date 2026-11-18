@@ -28,7 +28,7 @@ import { cn } from '@/lib/cn'
 import { getForcedState } from '@/lib/forced'
 import { img, peso } from '@/lib/format'
 import { useMediaQuery } from '@/lib/useMedia'
-import { supabase } from '@/lib/supabase'
+import { DatabaseBusinessProfile } from './DatabaseBusinessProfile'
 
 type TabKey = 'posts' | 'reviews' | 'menu' | 'photos' | 'reels' | 'about'
 const TABS: { key: TabKey; label: string }[] = [
@@ -48,95 +48,8 @@ export function ShopDetailScreen() {
 /** Facebook-style business profile. `embedded` is the compact desktop side-panel version. */
 export function ShopDetail({ id, embedded }: { id: string; embedded?: boolean }) {
   const place = placeById(id)
-  if (!place) return <DatabaseBusinessDetail id={id} />
+  if (!place) return <DatabaseBusinessProfile id={id} />
   return <Profile key={place.id} place={place} embedded={embedded} />
-}
-
-type DatabaseBusiness = {
-  id: string
-  name: string
-  business_type: string | null
-  price_range: string | null
-  address: string
-  city: string
-  about: string
-  specialties: string[]
-  cover_url: string | null
-  verification_status: string
-}
-
-function DatabaseBusinessDetail({ id }: { id: string }) {
-  const navigate = useNavigate()
-  const [business, setBusiness] = useState<DatabaseBusiness | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [failed, setFailed] = useState(false)
-
-  useEffect(() => {
-    let active = true
-    void (async () => {
-      const { data, error } = await supabase
-        .from('businesses')
-        .select('id, name, business_type, price_range, address, city, about, specialties, cover_url, verification_status')
-        .eq('id', id)
-        .eq('live', true)
-        .eq('verification_status', 'verified')
-        .maybeSingle()
-      if (!active) return
-      if (error) {
-        console.error('Business detail lookup failed', error)
-        setFailed(true)
-      } else {
-        setBusiness(data)
-      }
-      setLoading(false)
-    })()
-    return () => {
-      active = false
-    }
-  }, [id])
-
-  if (loading) return <p className="mx-auto max-w-[760px] px-4 py-10 text-fg-2">Kinukuha ang detalye ng negosyo…</p>
-  if (failed || !business) {
-    return (
-      <StateView
-        expression="unsure"
-        title="Hindi ko mahanap ang lugar na ito"
-        body={failed ? 'Hindi ma-access ang detalye ngayon. Subukan ulit mamaya.' : 'Baka hindi na live o verified ang negosyong ito.'}
-        action="Bumalik sa Home"
-        onAction={() => navigate('/')}
-      />
-    )
-  }
-
-  const cover = business.cover_url && /^https?:\/\//i.test(business.cover_url) ? business.cover_url : null
-  return (
-    <main className="mx-auto min-h-dvh max-w-[760px] pb-24">
-      <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-line bg-bg/90 px-4 py-3 backdrop-blur-xl">
-        <BackButton />
-        <span className="truncate font-semibold">Detalye ng negosyo</span>
-      </div>
-      {cover && <img src={cover} alt="" className="aspect-[16/9] w-full object-cover" />}
-      <div className="space-y-4 px-4 py-5">
-        <div>
-          <h1 className="text-title">{business.name}</h1>
-          <p className="mt-1 text-body text-fg-2">{[business.business_type, business.price_range].filter(Boolean).join(' · ') || 'Negosyo'}</p>
-          <p className="mt-2 text-sm text-fg-2">{[business.address, business.city].filter(Boolean).join(', ')}</p>
-        </div>
-        {business.about && <p className="text-body leading-6">{business.about}</p>}
-        {business.specialties?.length > 0 && (
-          <section>
-            <h2 className="mb-2 text-h3">Mga specialty</h2>
-            <div className="flex flex-wrap gap-2">
-              {business.specialties.map((specialty) => (
-                <span key={specialty} className="rounded-full bg-surface px-3 py-1.5 text-sm">{specialty}</span>
-              ))}
-            </div>
-          </section>
-        )}
-        <p className="text-xs text-fg-2">Verified na negosyo · Hindi pa kasama sa bot ang live rating o oras ng negosyo.</p>
-      </div>
-    </main>
-  )
 }
 
 function Profile({ place, embedded }: { place: Place; embedded?: boolean }) {

@@ -1,20 +1,59 @@
-import { Bell, Check, ChevronDown, CloudOff, Download, Globe, Moon, Plus, Share, SquarePlus, Sun, TriangleAlert, Zap } from 'lucide-react'
-import { AnimatePresence, motion } from 'motion/react'
-import { useEffect, useState } from 'react'
-import { Link, Navigate, Outlet, ScrollRestoration, useLocation, useNavigate } from 'react-router'
-import { useTheme } from '@/app/theme'
-import { Jimbot } from '@/components/mascot/Jimbot'
-import { Button } from '@/components/ui/Button'
-import { Sheet } from '@/components/ui/Sheet'
-import { cn } from '@/lib/cn'
-import { isEmbed } from '@/lib/forced'
-import { useInstallPrompt } from '@/lib/useInstallPrompt'
-import { useOnline } from '@/lib/useOnline'
-import { relTime } from './format'
-import { ContentIcon, FoxIcon, SearchIcon, StatsIcon, UserIcon } from './icons'
-import { QuickUpdatePanel } from './QuickUpdate'
-import { BizProvider, useBiz, type LangPref } from './store'
-import { Avatar, BizStatusChip } from './ui'
+import {
+  Bell,
+  Check,
+  ChevronDown,
+  CloudOff,
+  Download,
+  Globe,
+  Moon,
+  Plus,
+  Share,
+  SquarePlus,
+  Sun,
+  TriangleAlert,
+  Zap,
+} from "lucide-react"
+
+import { AnimatePresence, motion } from "motion/react"
+
+import { useEffect, useState } from "react"
+
+import {
+  Link,
+  Navigate,
+  Outlet,
+  ScrollRestoration,
+  useLocation,
+  useNavigate,
+} from "react-router"
+
+import { useTheme } from "@/app/theme"
+
+import { Jimbot } from "@/components/mascot/Jimbot"
+
+import { Button } from "@/components/ui/Button"
+
+import { Sheet } from "@/components/ui/Sheet"
+
+import { cn } from "@/lib/cn"
+
+import { isEmbed } from "@/lib/forced"
+
+import { useInstallPrompt } from "@/lib/useInstallPrompt"
+
+import { useOnline } from "@/lib/useOnline"
+
+import { relTime } from "./format"
+
+import { ContentIcon, FoxIcon, SearchIcon, StatsIcon, UserIcon } from "./icons"
+
+import { QuickUpdatePanel } from "./QuickUpdate"
+
+import { BizProvider, useBiz, type LangPref } from "./store"
+
+import { Avatar, BizStatusChip } from "./ui"
+
+import { resolveBusinessImage } from "./db/assets"
 
 /* ------------------------------ Root: provider, gate, toast, manifest ------------------------------ */
 
@@ -22,18 +61,71 @@ const FREE = /^\/biz\/(language|welcome|auth|signup|screens)/
 
 function BizGate() {
   const { d, loading, loadError, retryLoad, t } = useBiz()
+
   const { pathname, search } = useLocation()
-  if (loading) return <main className="grid min-h-screen place-items-center p-6 text-center" role="status">{t('Kinukuha ang datos ng negosyo…', 'Loading business data…')}</main>
-  if (loadError) return <main className="grid min-h-screen place-items-center p-6 text-center"><div role="alert" className="max-w-md"><p>{loadError}</p><button className="mt-4 rounded-full bg-primary px-5 py-3 font-medium text-ink" onClick={retryLoad}>{t('Subukang muli', 'Retry')}</button></div></main>
-  if (!isEmbed() && !new URLSearchParams(search).has('embed')) {
-    const authEntry = pathname === '/biz/auth' || pathname === '/biz/auth/email' || pathname === '/biz/auth/verify' || pathname === '/biz/auth/recovery' || pathname === '/biz/welcome'
-    const businessSignup = pathname === '/biz/auth' && new URLSearchParams(search).get('mode') === 'signup'
-    const passwordRecovery = pathname === '/biz/auth/recovery'
-    if (d.session && authEntry && !businessSignup && !passwordRecovery) return <Navigate to={d.business.name ? '/biz/stats' : '/biz/setup'} replace />
-    if (!d.session && !d.langPref && !pathname.startsWith('/biz/language') && !pathname.startsWith('/biz/screens') && pathname !== '/biz/auth/callback') return <Navigate to="/biz/language" replace />
-    if (d.session && pathname === '/biz/auth' && !search.includes('mode=')) return <Navigate to={d.business.name ? '/biz/stats' : '/biz/setup'} replace />
-    if (d.langPref && !d.session && !FREE.test(pathname)) return <Navigate to="/biz/welcome" replace />
+
+  if (loading)
+    return (
+      <main
+        className="grid min-h-screen place-items-center p-6 text-center"
+        role="status"
+      >
+        {t("Kinukuha ang datos ng negosyo…", "Loading business data…")}
+      </main>
+    )
+
+  if (loadError)
+    return (
+      <main className="grid min-h-screen place-items-center p-6 text-center">
+        <div role="alert" className="max-w-md">
+          <p>{loadError}</p>
+          <button
+            className="mt-4 rounded-full bg-primary px-5 py-3 font-medium text-ink"
+            onClick={retryLoad}
+          >
+            {t("Subukang muli", "Retry")}
+          </button>
+        </div>
+      </main>
+    )
+
+  if (!isEmbed() && !new URLSearchParams(search).has("embed")) {
+    const authEntry =
+      pathname === "/biz/auth" ||
+      pathname === "/biz/auth/email" ||
+      pathname === "/biz/auth/verify" ||
+      pathname === "/biz/auth/recovery" ||
+      pathname === "/biz/welcome"
+
+    const businessSignup =
+      pathname === "/biz/auth" &&
+      new URLSearchParams(search).get("mode") === "signup"
+
+    const passwordRecovery = pathname === "/biz/auth/recovery"
+
+    if (d.session && authEntry && !businessSignup && !passwordRecovery)
+      return (
+        <Navigate to={d.business.name ? "/biz/stats" : "/biz/setup"} replace />
+      )
+
+    if (
+      !d.session &&
+      !d.langPref &&
+      !pathname.startsWith("/biz/language") &&
+      !pathname.startsWith("/biz/screens") &&
+      pathname !== "/biz/auth/callback"
+    )
+      return <Navigate to="/biz/language" replace />
+
+    if (d.session && pathname === "/biz/auth" && !search.includes("mode="))
+      return (
+        <Navigate to={d.business.name ? "/biz/stats" : "/biz/setup"} replace />
+      )
+
+    if (d.langPref && !d.session && !FREE.test(pathname))
+      return <Navigate to="/biz/welcome" replace />
   }
+
   return (
     <>
       <Outlet />
@@ -46,19 +138,32 @@ function BizGate() {
 export function BizRoot() {
   useEffect(() => {
     const link = document.querySelector<HTMLLinkElement>('link[rel="manifest"]')
-    const prevHref = link?.getAttribute('href')
+
+    const prevHref = link?.getAttribute("href")
+
     const prevTitle = document.title
-    link?.setAttribute('href', `${import.meta.env.BASE_URL}biz.webmanifest`)
-    document.title = 'Bitinary Business'
-    const apple = document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-title"]')
+
+    link?.setAttribute("href", `${import.meta.env.BASE_URL}biz.webmanifest`)
+
+    document.title = "Bitinary Business"
+
+    const apple = document.querySelector<HTMLMetaElement>(
+      'meta[name="apple-mobile-web-app-title"]',
+    )
+
     const prevApple = apple?.content
-    if (apple) apple.content = 'Bitinary Biz'
+
+    if (apple) apple.content = "Bitinary Biz"
+
     return () => {
-      if (link && prevHref) link.setAttribute('href', prevHref)
+      if (link && prevHref) link.setAttribute("href", prevHref)
+
       document.title = prevTitle
+
       if (apple && prevApple) apple.content = prevApple
     }
   }, [])
+
   return (
     <BizProvider>
       <BizGate />
@@ -68,26 +173,57 @@ export function BizRoot() {
 
 function BizToast() {
   const { toast, dismissToast, t } = useBiz()
+
   const navigate = useNavigate()
+
   useEffect(() => {
     if (!toast) return
-    const tm = setTimeout(dismissToast, toast.action || toast.undo ? 5000 : 2600)
+
+    const tm = setTimeout(
+      dismissToast,
+      toast.action || toast.undo ? 5000 : 2600,
+    )
+
     return () => clearTimeout(tm)
   }, [toast, dismissToast])
+
   return (
-    <div className="pointer-events-none fixed inset-x-0 top-0 z-[95] flex justify-center px-4 pt-[max(12px,env(safe-area-inset-top))]" aria-live="polite">
+    <div
+      className="pointer-events-none fixed inset-x-0 top-0 z-[95] flex justify-center px-4 pt-[max(12px,env(safe-area-inset-top))]"
+      aria-live="polite"
+    >
       <AnimatePresence>
         {toast && (
-          <motion.div key={toast.id} role="status" initial={{ y: -70, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }} className="glass pointer-events-auto flex max-w-[460px] items-center gap-3 rounded-[22px] py-2 pl-2 pr-3 shadow-float">
-            <Jimbot crop="head" size={40} expression={toast.expression ?? 'celebrating'} animate={false} />
-            <p className="font-display text-[15px] font-medium text-fg">{toast.text}</p>
+          <motion.div
+            key={toast.id}
+            role="status"
+            initial={{ y: -70, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -50, opacity: 0 }}
+            className="glass pointer-events-auto flex max-w-[460px] items-center gap-3 rounded-[22px] py-2 pl-2 pr-3 shadow-float"
+          >
+            <Jimbot
+              crop="head"
+              size={40}
+              expression={toast.expression ?? "celebrating"}
+              animate={false}
+            />
+            <p className="font-display text-[15px] font-medium text-fg">
+              {toast.text}
+            </p>
             {toast.undo && (
-              <button onClick={() => (toast.undo!(), dismissToast())} className="ml-1 h-10 shrink-0 rounded-full bg-brown px-3 font-display text-[14px] font-medium text-cream dark:bg-elevated">
-                {t('I-undo', 'Undo')}
+              <button
+                onClick={() => (toast.undo!(), dismissToast())}
+                className="ml-1 h-10 shrink-0 rounded-full bg-brown px-3 font-display text-[14px] font-medium text-cream dark:bg-elevated"
+              >
+                {t("I-undo", "Undo")}
               </button>
             )}
             {toast.action && (
-              <button onClick={() => (navigate(toast.action!.to), dismissToast())} className="ml-1 h-10 shrink-0 rounded-full bg-primary px-3 font-display text-[14px] font-medium text-ink">
+              <button
+                onClick={() => (navigate(toast.action!.to), dismissToast())}
+                className="ml-1 h-10 shrink-0 rounded-full bg-primary px-3 font-display text-[14px] font-medium text-ink"
+              >
                 {toast.action.label}
               </button>
             )}
@@ -102,48 +238,152 @@ function BizToast() {
 
 export function useNav() {
   const { t } = useBiz()
+
   return [
-    { to: '/biz/stats', label: t('Statistika', 'Statistics'), short: t('Statistika', 'Statistics'), icon: StatsIcon },
-    { to: '/biz/jimbot', label: 'Jimbot', short: 'Jimbot', icon: FoxIcon },
-    { to: '/biz/search', label: t('Hanapin', 'Search'), short: t('Hanapin', 'Search'), icon: SearchIcon },
-    { to: '/biz/content', label: t('Nilalaman at Social', 'Blog and Social'), short: t('Nilalaman', 'Social'), icon: ContentIcon },
-    { to: '/biz/account', label: 'Account', short: 'Account', icon: UserIcon },
+    {
+      to: "/biz/stats",
+      label: t("Statistika", "Statistics"),
+      short: t("Statistika", "Statistics"),
+      icon: StatsIcon,
+    },
+
+    { to: "/biz/jimbot", label: "Jimbot", short: "Jimbot", icon: FoxIcon },
+
+    {
+      to: "/biz/search",
+      label: t("Hanapin", "Search"),
+      short: t("Hanapin", "Search"),
+      icon: SearchIcon,
+    },
+
+    {
+      to: "/biz/content",
+      label: t("Nilalaman at Social", "Blog and Social"),
+      short: t("Nilalaman", "Social"),
+      icon: ContentIcon,
+    },
+
+    { to: "/biz/account", label: "Account", short: "Account", icon: UserIcon },
   ]
+}
+
+type SheetProps = {
+  open: boolean
+  onClose: () => void
+}
+
+type LanguageOption = {
+  v: LangPref
+  label: string
+  sub: string
 }
 
 function BusinessMark({ size = 44 }: { size?: number }) {
   const { d } = useBiz()
-  return d.business.cover ? <img src={d.business.cover} alt="" className="shrink-0 rounded-[14px] object-cover ring-2 ring-cream/30" style={{ width: size, height: size }} /> : <Avatar name={d.business.name || 'B'} size={size} className="rounded-[14px]" />
+
+  const imagePath = d.business.logo || d.business.cover
+
+  const [image, setImage] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+
+    setImage(null)
+
+    if (!imagePath) return
+
+    void resolveBusinessImage(imagePath)
+
+      .then((url) => {
+        if (active) setImage(url)
+      })
+
+      .catch((error: unknown) => {
+        console.error("Business profile image could not be loaded.", error)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [imagePath])
+
+  return image ? (
+    <img
+      src={image}
+      alt=""
+      className="shrink-0 rounded-[14px] object-cover ring-2 ring-cream/30"
+      style={{ width: size, height: size }}
+    />
+  ) : (
+    <Avatar
+      name={d.business.name || "B"}
+      size={size}
+      className="rounded-[14px]"
+    />
+  )
 }
 
 function Sidebar({ onBranch }: { onBranch: () => void }) {
   const nav = useNav()
+
   const { pathname } = useLocation()
+
   const { d, t } = useBiz()
+
   const branch = d.branches.find((b) => b.id === d.activeBranch)
+
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-[264px] flex-col bg-brown px-4 pb-5 pt-6 text-cream xl:flex dark:border-r dark:border-line dark:bg-surface">
       <div className="flex items-center gap-3 px-1">
         <BusinessMark />
         <div className="min-w-0">
-          <p className="truncate font-display text-[16px] font-semibold leading-tight">{d.business.name || t('Negosyo mo', 'Your business')}</p>
+          <p className="truncate font-display text-[16px] font-semibold leading-tight">
+            {d.business.name || t("Negosyo mo", "Your business")}
+          </p>
           <p className="text-[13px] text-[#E8CDB9]">Bitinary Business</p>
         </div>
       </div>
-      <button onClick={onBranch} className="mt-4 flex h-12 items-center gap-2 rounded-[14px] bg-white/10 px-3 text-left hover:bg-white/15" aria-label={t('Palitan ang branch', 'Switch branch')}>
+      <button
+        onClick={onBranch}
+        className="mt-4 flex h-12 items-center gap-2 rounded-[14px] bg-white/10 px-3 text-left hover:bg-white/15"
+        aria-label={t("Palitan ang branch", "Switch branch")}
+      >
         <span className="min-w-0 flex-1">
-          <span className="block text-[11px] uppercase tracking-wide text-[#E8CDB9]">Branch</span>
-          <span className="block truncate font-display text-[14px] font-medium">{branch?.name}</span>
+          <span className="block text-[11px] uppercase tracking-wide text-[#E8CDB9]">
+            Branch
+          </span>
+          <span className="block truncate font-display text-[14px] font-medium">
+            {branch?.name}
+          </span>
         </span>
         <ChevronDown size={18} />
       </button>
-      <nav aria-label={t('Pangunahing navigation', 'Main navigation')} className="mt-6 flex flex-col gap-1">
+      <nav
+        aria-label={t("Pangunahing navigation", "Main navigation")}
+        className="mt-6 flex flex-col gap-1"
+      >
         {nav.map((n) => {
           const active = pathname.startsWith(n.to)
+
           const I = n.icon
+
           return (
-            <Link key={n.to} to={n.to} aria-current={active ? 'page' : undefined} className={cn('relative flex min-h-12 items-center gap-3 rounded-[14px] px-3 font-display text-[15px] font-medium', active ? 'text-ink' : 'text-cream/85 hover:bg-white/10')}>
-              {active && <motion.span layoutId="biz-side" className="absolute inset-0 rounded-[14px] bg-primary" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
+            <Link
+              key={n.to}
+              to={n.to}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "relative flex min-h-12 items-center gap-3 rounded-[14px] px-3 font-display text-[15px] font-medium",
+                active ? "text-ink" : "text-cream/85 hover:bg-white/10",
+              )}
+            >
+              {active && (
+                <motion.span
+                  layoutId="biz-side"
+                  className="absolute inset-0 rounded-[14px] bg-primary"
+                  transition={{ type: "spring", stiffness: 500, damping: 40 }}
+                />
+              )}
               <I active={active} className="relative shrink-0" />
               <span className="relative leading-tight">{n.label}</span>
             </Link>
@@ -153,7 +393,9 @@ function Sidebar({ onBranch }: { onBranch: () => void }) {
       <div className="mt-auto flex items-center gap-2.5 rounded-[16px] bg-white/8 p-2.5">
         <Jimbot crop="head" shape="squircle" size={36} />
         <div className="min-w-0 text-[13px]">
-          <p className="truncate font-display font-semibold">{d.profile.name || 'Owner'}</p>
+          <p className="truncate font-display font-semibold">
+            {d.profile.name || "Owner"}
+          </p>
           <p className="text-[#E8CDB9]">Owner</p>
         </div>
       </div>
@@ -163,19 +405,42 @@ function Sidebar({ onBranch }: { onBranch: () => void }) {
 
 function Rail() {
   const nav = useNav()
+
   const { pathname } = useLocation()
+
   const { t } = useBiz()
+
   return (
-    <nav aria-label={t('Pangunahing navigation', 'Main navigation')} className="fixed inset-y-0 left-0 z-40 hidden w-[84px] flex-col items-center gap-2 bg-brown py-5 md:flex xl:hidden dark:border-r dark:border-line dark:bg-surface">
+    <nav
+      aria-label={t("Pangunahing navigation", "Main navigation")}
+      className="fixed inset-y-0 left-0 z-40 hidden w-[84px] flex-col items-center gap-2 bg-brown py-5 md:flex xl:hidden dark:border-r dark:border-line dark:bg-surface"
+    >
       <div className="mb-4">
         <BusinessMark size={46} />
       </div>
       {nav.map((n) => {
         const active = pathname.startsWith(n.to)
+
         const I = n.icon
+
         return (
-          <Link key={n.to} to={n.to} aria-label={n.label} title={n.label} aria-current={active ? 'page' : undefined} className={cn('relative flex h-14 w-14 items-center justify-center rounded-[18px]', active ? 'text-ink' : 'text-cream/85 hover:bg-white/10')}>
-            {active && <motion.span layoutId="biz-rail" className="absolute inset-0 rounded-[18px] bg-primary" />}
+          <Link
+            key={n.to}
+            to={n.to}
+            aria-label={n.label}
+            title={n.label}
+            aria-current={active ? "page" : undefined}
+            className={cn(
+              "relative flex h-14 w-14 items-center justify-center rounded-[18px]",
+              active ? "text-ink" : "text-cream/85 hover:bg-white/10",
+            )}
+          >
+            {active && (
+              <motion.span
+                layoutId="biz-rail"
+                className="absolute inset-0 rounded-[18px] bg-primary"
+              />
+            )}
             <I active={active} className="relative" />
           </Link>
         )
@@ -186,20 +451,43 @@ function Rail() {
 
 function TabBar() {
   const nav = useNav()
+
   const { pathname } = useLocation()
+
   const { t } = useBiz()
+
   return (
-    <nav aria-label={t('Pangunahing navigation', 'Main navigation')} className="pointer-events-none fixed inset-x-0 bottom-0 z-40 px-3 pb-[max(10px,env(safe-area-inset-bottom))] md:hidden">
+    <nav
+      aria-label={t("Pangunahing navigation", "Main navigation")}
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 px-3 pb-[max(10px,env(safe-area-inset-bottom))] md:hidden"
+    >
       <ul className="glass pointer-events-auto mx-auto flex h-[66px] max-w-[460px] items-center justify-between rounded-[30px] px-1.5 shadow-float">
         {nav.map((n) => {
           const active = pathname.startsWith(n.to)
+
           const I = n.icon
+
           return (
             <li key={n.to} className="flex-1">
-              <Link to={n.to} aria-current={active ? 'page' : undefined} aria-label={n.label} className={cn('relative mx-auto flex h-[54px] w-full max-w-[78px] flex-col items-center justify-center gap-0.5 rounded-[24px]', active ? 'text-ink' : 'text-muted dark:text-[#C9A893]')}>
-                {active && <motion.span layoutId="biz-tab" className="absolute inset-0 rounded-[24px] bg-primary" />}
+              <Link
+                to={n.to}
+                aria-current={active ? "page" : undefined}
+                aria-label={n.label}
+                className={cn(
+                  "relative mx-auto flex h-[54px] w-full max-w-[78px] flex-col items-center justify-center gap-0.5 rounded-[24px]",
+                  active ? "text-ink" : "text-muted dark:text-[#C9A893]",
+                )}
+              >
+                {active && (
+                  <motion.span
+                    layoutId="biz-tab"
+                    className="absolute inset-0 rounded-[24px] bg-primary"
+                  />
+                )}
                 <I active={active} className="relative" />
-                <span className="relative max-w-full truncate px-1 font-display text-[11px] font-medium leading-none">{n.short}</span>
+                <span className="relative max-w-full truncate px-1 font-display text-[11px] font-medium leading-none">
+                  {n.short}
+                </span>
               </Link>
             </li>
           )
@@ -211,53 +499,121 @@ function TabBar() {
 
 /* ------------------------------ Top bar ------------------------------ */
 
-function IconBtn({ label, onClick, children, badge }: { label: string; onClick: () => void; children: React.ReactNode; badge?: number }) {
+function IconBtn({
+  label,
+  onClick,
+  children,
+  badge,
+}: {
+  label: string
+  onClick: () => void
+  children: React.ReactNode
+  badge?: number
+}) {
   return (
-    <button onClick={onClick} aria-label={label} title={label} className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-fg hover:bg-sunken dark:hover:bg-elevated">
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-fg hover:bg-sunken dark:hover:bg-elevated"
+    >
       {children}
-      {!!badge && <span className="absolute right-1 top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-1 text-[11px] font-semibold text-white">{badge}</span>}
+      {!!badge && (
+        <span className="absolute right-1 top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-1 text-[11px] font-semibold text-white">
+          {badge}
+        </span>
+      )}
     </button>
   )
 }
 
-export function LangSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function LangSheet({ open, onClose }: SheetProps) {
   const { d, t, setLangPref } = useBiz()
-  const opts: { v: LangPref; label: string; sub: string }[] = [
-    { v: 'en', label: 'English', sub: 'Use Bitinary Business in English' },
-    { v: 'tl', label: 'Tagalog', sub: 'Gamitin ang Bitinary Business sa Tagalog' },
-    { v: 'device', label: t('Sundin ang device', 'Follow device'), sub: t('Ayon sa wika ng phone o computer', "Match your phone or computer's language") },
+
+  const opts: LanguageOption[] = [
+    { v: "en", label: "English", sub: "Use Bitinary Business in English" },
+
+    {
+      v: "tl",
+      label: "Tagalog",
+      sub: "Gamitin ang Bitinary Business sa Tagalog",
+    },
+
+    {
+      v: "device",
+      label: t("Sundin ang device", "Follow device"),
+      sub: t(
+        "Ayon sa wika ng phone o computer",
+        "Match your phone or computer's language",
+      ),
+    },
   ]
+
   return (
-    <Sheet open={open} onClose={onClose} title={t('Wika', 'Language')}>
+    <Sheet open={open} onClose={onClose} title={t("Wika", "Language")}>
       <div role="radiogroup" className="space-y-2">
         {opts.map((o) => (
-          <button key={o.v} role="radio" aria-checked={d.langPref === o.v} onClick={() => (setLangPref(o.v), onClose())} className={cn('flex min-h-14 w-full items-center gap-3 rounded-[16px] border-2 px-4 py-2 text-left', d.langPref === o.v ? 'border-primary bg-primary/10' : 'border-line')}>
+          <button
+            key={o.v}
+            role="radio"
+            aria-checked={d.langPref === o.v}
+            onClick={() => (setLangPref(o.v), onClose())}
+            className={cn(
+              "flex min-h-14 w-full items-center gap-3 rounded-[16px] border-2 px-4 py-2 text-left",
+              d.langPref === o.v
+                ? "border-primary bg-primary/10"
+                : "border-line",
+            )}
+          >
             <span className="min-w-0 flex-1">
-              <span className="block font-display text-[16px] font-semibold">{o.label}</span>
+              <span className="block font-display text-[16px] font-semibold">
+                {o.label}
+              </span>
               <span className="text-[14px] text-fg-2">{o.sub}</span>
             </span>
             {d.langPref === o.v && <Check size={20} className="text-link" />}
           </button>
         ))}
       </div>
-      <p className="mt-3 text-[14px] text-fg-2">{t('Agad magpapalit, hindi kailangang i-restart.', 'Switches instantly, no restart needed.')}</p>
+      <p className="mt-3 text-[14px] text-fg-2">
+        {t(
+          "Agad magpapalit, hindi kailangang i-restart.",
+          "Switches instantly, no restart needed.",
+        )}
+      </p>
     </Sheet>
   )
 }
 
-function TopBar({ onQuick, onLang, onBell }: { onQuick: () => void; onLang: () => void; onBell: () => void }) {
+function TopBar({
+  onQuick,
+  onLang,
+  onBell,
+}: {
+  onQuick: () => void
+  onLang: () => void
+  onBell: () => void
+}) {
   const { d, t, status } = useBiz()
+
   const { resolved, setMode } = useTheme()
+
   const install = useInstallPrompt()
+
   const [installHelp, setInstallHelp] = useState(false)
+
   const unread = d.notifs.filter((n) => !n.read).length
+
   const requestInstall = async () => {
     if (install.canPrompt) {
       await install.install()
+
       return
     }
+
     setInstallHelp(true)
   }
+
   return (
     <>
       <div className="glass sticky top-0 z-30 border-x-0 border-t-0 pt-[env(safe-area-inset-top)]">
@@ -265,8 +621,13 @@ function TopBar({ onQuick, onLang, onBell }: { onQuick: () => void; onLang: () =
           <div className="flex min-w-0 flex-1 items-center gap-2.5 md:hidden">
             <BusinessMark size={36} />
             <div className="min-w-0">
-              <p className="truncate font-display text-[15px] font-semibold leading-tight">{d.business.name || 'Bitinary Business'}</p>
-              <BizStatusChip status={status} className="mt-0.5 h-6 px-2 text-[11px]" />
+              <p className="truncate font-display text-[15px] font-semibold leading-tight">
+                {d.business.name || "Bitinary Business"}
+              </p>
+              <BizStatusChip
+                status={status}
+                className="mt-0.5 h-6 px-2 text-[11px]"
+              />
             </div>
           </div>
           <div className="hidden min-w-0 flex-1 md:block">
@@ -275,12 +636,19 @@ function TopBar({ onQuick, onLang, onBell }: { onQuick: () => void; onLang: () =
           {!install.isStandalone && (
             <>
               <span className="hidden sm:block">
-                <Button size="md" icon={<Download size={18} />} onClick={requestInstall}>
-                  {t('I-install', 'Install app')}
+                <Button
+                  size="md"
+                  icon={<Download size={18} />}
+                  onClick={requestInstall}
+                >
+                  {t("I-install", "Install app")}
                 </Button>
               </span>
               <span className="sm:hidden">
-                <IconBtn label={t('I-install ang app', 'Install app')} onClick={requestInstall}>
+                <IconBtn
+                  label={t("I-install ang app", "Install app")}
+                  onClick={requestInstall}
+                >
                   <Download size={21} className="text-link" />
                 </IconBtn>
               </span>
@@ -288,73 +656,152 @@ function TopBar({ onQuick, onLang, onBell }: { onQuick: () => void; onLang: () =
           )}
           <span className="hidden sm:block">
             <Button size="md" icon={<Zap size={18} />} onClick={onQuick}>
-              {t('Mabilis na Update', 'Quick Update')}
+              {t("Mabilis na Update", "Quick Update")}
             </Button>
           </span>
           <span className="sm:hidden">
-            <IconBtn label={t('Mabilis na Update', 'Quick Update')} onClick={onQuick}>
+            <IconBtn
+              label={t("Mabilis na Update", "Quick Update")}
+              onClick={onQuick}
+            >
               <Zap size={21} className="text-link" />
             </IconBtn>
           </span>
-          <IconBtn label={t('Wika', 'Language')} onClick={onLang}>
+          <IconBtn label={t("Wika", "Language")} onClick={onLang}>
             <Globe size={21} strokeWidth={1.75} />
           </IconBtn>
-          <IconBtn label={resolved === 'dark' ? t('Light mode', 'Light mode') : t('Dark mode', 'Dark mode')} onClick={() => setMode(resolved === 'dark' ? 'light' : 'dark')}>
-            {resolved === 'dark' ? <Sun size={21} strokeWidth={1.75} /> : <Moon size={21} strokeWidth={1.75} />}
+          <IconBtn
+            label={
+              resolved === "dark"
+                ? t("Light mode", "Light mode")
+                : t("Dark mode", "Dark mode")
+            }
+            onClick={() => setMode(resolved === "dark" ? "light" : "dark")}
+          >
+            {resolved === "dark" ? (
+              <Sun size={21} strokeWidth={1.75} />
+            ) : (
+              <Moon size={21} strokeWidth={1.75} />
+            )}
           </IconBtn>
-          <IconBtn label={t('Mga notification', 'Notifications')} onClick={onBell} badge={unread}>
+          <IconBtn
+            label={t("Mga notification", "Notifications")}
+            onClick={onBell}
+            badge={unread}
+          >
             <Bell size={21} strokeWidth={1.75} />
           </IconBtn>
         </div>
       </div>
-      <Sheet open={installHelp} onClose={() => setInstallHelp(false)} title={t('Idagdag sa Home Screen', 'Install Bitinary Business')}>
+      <Sheet
+        open={installHelp}
+        onClose={() => setInstallHelp(false)}
+        title={t("Idagdag sa Home Screen", "Install Bitinary Business")}
+      >
         <ol className="space-y-3 text-body">
           {install.isIOS ? (
             <>
               <li className="flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunken"><Share size={20} /></span>
-                {t('I-tap ang Share sa ibaba ng Safari.', 'Tap Share at the bottom of Safari.')}
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunken">
+                  <Share size={20} />
+                </span>
+                {t(
+                  "I-tap ang Share sa ibaba ng Safari.",
+                  "Tap Share at the bottom of Safari.",
+                )}
               </li>
               <li className="flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunken"><SquarePlus size={20} /></span>
-                {t('Piliin ang Add to Home Screen.', 'Choose Add to Home Screen.')}
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunken">
+                  <SquarePlus size={20} />
+                </span>
+                {t(
+                  "Piliin ang Add to Home Screen.",
+                  "Choose Add to Home Screen.",
+                )}
               </li>
             </>
           ) : (
             <>
-              <li>{t('Buksan ang menu ng browser.', 'Open your browser menu.')}</li>
-              <li>{t('Piliin ang Install app o Add to Home screen.', 'Choose Install app or Add to Home screen.')}</li>
+              <li>
+                {t("Buksan ang menu ng browser.", "Open your browser menu.")}
+              </li>
+              <li>
+                {t(
+                  "Piliin ang Install app o Add to Home screen.",
+                  "Choose Install app or Add to Home screen.",
+                )}
+              </li>
             </>
           )}
         </ol>
-        <Button block className="mt-5" onClick={() => setInstallHelp(false)}>{t('Sige', 'Done')}</Button>
+        <Button block className="mt-5" onClick={() => setInstallHelp(false)}>
+          {t("Sige", "Done")}
+        </Button>
       </Sheet>
     </>
   )
 }
 
-function NotifSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+function NotifSheet({ open, onClose }: SheetProps) {
   const { d, set, t, lang } = useBiz()
+
   const navigate = useNavigate()
+
   return (
-    <Sheet open={open} onClose={onClose} title={t('Mga notification', 'Notifications')}>
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={t("Mga notification", "Notifications")}
+    >
       <ul className="space-y-2">
         {d.notifs.map((n) => (
           <li key={n.id}>
             <button
               onClick={() => {
-                set((x) => ({ ...x, notifs: x.notifs.map((m) => (m.id === n.id ? { ...m, read: true } : m)) }))
+                set((x) => ({
+                  ...x,
+                  notifs: x.notifs.map((m) =>
+                    m.id === n.id ? { ...m, read: true } : m,
+                  ),
+                }))
+
                 onClose()
+
                 navigate(n.to)
               }}
-              className={cn('flex w-full items-center gap-3 rounded-[16px] p-3 text-left', n.read ? 'bg-transparent' : 'bg-sunken dark:bg-elevated')}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-[16px] p-3 text-left",
+                n.read ? "bg-transparent" : "bg-sunken dark:bg-elevated",
+              )}
             >
-              <Jimbot crop="head" size={40} expression={n.kind === 'review' ? 'celebrating' : n.kind === 'report-week' ? 'idea' : n.kind === 'report' ? 'pointing' : 'waving'} animate={false} />
+              <Jimbot
+                crop="head"
+                size={40}
+                expression={
+                  n.kind === "review"
+                    ? "celebrating"
+                    : n.kind === "report-week"
+                      ? "idea"
+                      : n.kind === "report"
+                        ? "pointing"
+                        : "waving"
+                }
+                animate={false}
+              />
               <span className="min-w-0 flex-1">
-                <span className="block text-[16px] font-semibold leading-snug">{n[lang]}</span>
-                <span className="text-[13px] text-fg-2">{relTime(n.at, lang)}</span>
+                <span className="block text-[16px] font-semibold leading-snug">
+                  {n[lang]}
+                </span>
+                <span className="text-[13px] text-fg-2">
+                  {relTime(n.at, lang)}
+                </span>
               </span>
-              {!n.read && <span className="h-2.5 w-2.5 rounded-full bg-primary" aria-label={t('Hindi pa nababasa', 'Unread')} />}
+              {!n.read && (
+                <span
+                  className="h-2.5 w-2.5 rounded-full bg-primary"
+                  aria-label={t("Hindi pa nababasa", "Unread")}
+                />
+              )}
             </button>
           </li>
         ))}
@@ -363,24 +810,58 @@ function NotifSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   )
 }
 
-function BranchSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+function BranchSheet({ open, onClose }: SheetProps) {
   const { d, set, t, showToast } = useBiz()
+
   const navigate = useNavigate()
+
   return (
-    <Sheet open={open} onClose={onClose} title={t('Pumili ng branch', 'Choose a branch')}>
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={t("Pumili ng branch", "Choose a branch")}
+    >
       <div role="radiogroup" className="space-y-2">
         {d.branches.map((b) => (
-          <button key={b.id} role="radio" aria-checked={d.activeBranch === b.id} onClick={() => (set((x) => ({ ...x, activeBranch: b.id })), onClose(), showToast({ text: t(`Lumipat sa ${b.name}`, `Switched to ${b.name}`), expression: 'pointing' }))} className={cn('flex min-h-14 w-full items-center gap-3 rounded-[16px] border-2 px-4 text-left', d.activeBranch === b.id ? 'border-primary bg-primary/10' : 'border-line')}>
+          <button
+            key={b.id}
+            role="radio"
+            aria-checked={d.activeBranch === b.id}
+            onClick={() => (
+              set((x) => ({ ...x, activeBranch: b.id })),
+              onClose(),
+              showToast({
+                text: t(`Lumipat sa ${b.name}`, `Switched to ${b.name}`),
+                expression: "pointing",
+              })
+            )}
+            className={cn(
+              "flex min-h-14 w-full items-center gap-3 rounded-[16px] border-2 px-4 text-left",
+              d.activeBranch === b.id
+                ? "border-primary bg-primary/10"
+                : "border-line",
+            )}
+          >
             <span className="min-w-0 flex-1">
-              <span className="block font-display text-[16px] font-semibold">{b.name}</span>
+              <span className="block font-display text-[16px] font-semibold">
+                {b.name}
+              </span>
               <span className="text-[14px] text-fg-2">{b.area}</span>
             </span>
-            {d.activeBranch === b.id && <Check size={20} className="text-link" />}
+            {d.activeBranch === b.id && (
+              <Check size={20} className="text-link" />
+            )}
           </button>
         ))}
       </div>
-      <Button block variant="secondary" className="mt-3" icon={<Plus size={18} />} onClick={() => (onClose(), navigate('/biz/account/team'))}>
-        {t('Pamahalaan ang mga branch', 'Manage branches')}
+      <Button
+        block
+        variant="secondary"
+        className="mt-3"
+        icon={<Plus size={18} />}
+        onClick={() => (onClose(), navigate("/biz/account/team"))}
+      >
+        {t("Pamahalaan ang mga branch", "Manage branches")}
       </Button>
     </Sheet>
   )
@@ -390,37 +871,68 @@ function BranchSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
 
 export function BizShell() {
   const { t, status, d } = useBiz()
+
   const online = useOnline()
+
   const navigate = useNavigate()
-  const [sheet, setSheet] = useState<'quick' | 'lang' | 'bell' | 'branch' | null>(null)
+
+  const [sheet, setSheet] =
+    useState<"quick" | "lang" | "bell" | "branch" | null>(null)
+
   return (
     <div className="min-h-dvh bg-bg text-fg">
-      <Sidebar onBranch={() => setSheet('branch')} />
+      <Sidebar onBranch={() => setSheet("branch")} />
       <Rail />
       <div className="min-h-dvh pb-28 md:ml-[84px] md:pb-10 xl:ml-[264px]">
-        <TopBar onQuick={() => setSheet('quick')} onLang={() => setSheet('lang')} onBell={() => setSheet('bell')} />
+        <TopBar
+          onQuick={() => setSheet("quick")}
+          onLang={() => setSheet("lang")}
+          onBell={() => setSheet("bell")}
+        />
         {!online && (
-          <div role="status" className="mx-4 mt-3 flex items-center gap-3 rounded-[16px] bg-caution-bg px-4 py-3 text-caution md:mx-8">
+          <div
+            role="status"
+            className="mx-4 mt-3 flex items-center gap-3 rounded-[16px] bg-caution-bg px-4 py-3 text-caution md:mx-8"
+          >
             <CloudOff size={20} className="shrink-0" />
-            <p className="text-[15px] font-semibold">{t('Offline ka. Nase-save sa device ang mga pagbabago at isi-sync mamaya.', "You're offline. Changes save on this device and sync later.")}</p>
+            <p className="text-[15px] font-semibold">
+              {t(
+                "Offline ka. Nase-save sa device ang mga pagbabago at isi-sync mamaya.",
+                "You're offline. Changes save on this device and sync later.",
+              )}
+            </p>
           </div>
         )}
-        {status === 'draft' && d.session && (
-          <button onClick={() => navigate('/biz/setup')} className="mx-4 mt-3 flex w-[calc(100%-2rem)] items-center gap-3 rounded-[16px] border-2 border-caution/40 bg-caution-bg px-4 py-3 text-left text-caution md:mx-8 md:w-[calc(100%-4rem)]">
+        {status === "draft" && d.session && (
+          <button
+            onClick={() => navigate("/biz/setup")}
+            className="mx-4 mt-3 flex w-[calc(100%-2rem)] items-center gap-3 rounded-[16px] border-2 border-caution/40 bg-caution-bg px-4 py-3 text-left text-caution md:mx-8 md:w-[calc(100%-4rem)]"
+          >
             <TriangleAlert size={20} className="shrink-0" />
-            <span className="flex-1 text-[15px] font-semibold">{t('Draft pa ang negosyo mo. Tapusin ang 4 na kailangan para mag-live.', 'Your business is still a draft. Finish the 4 required themes to go live.')}</span>
-            <span className="font-display text-[14px] font-medium underline">{t('Ituloy', 'Continue')}</span>
+            <span className="flex-1 text-[15px] font-semibold">
+              {t(
+                "Draft pa ang negosyo mo. Tapusin ang 4 na kailangan para mag-live.",
+                "Your business is still a draft. Finish the 4 required themes to go live.",
+              )}
+            </span>
+            <span className="font-display text-[14px] font-medium underline">
+              {t("Ituloy", "Continue")}
+            </span>
           </button>
         )}
         <Outlet />
       </div>
       <TabBar />
-      <Sheet open={sheet === 'quick'} onClose={() => setSheet(null)} title={t('Mabilis na Update', 'Quick Update')}>
+      <Sheet
+        open={sheet === "quick"}
+        onClose={() => setSheet(null)}
+        title={t("Mabilis na Update", "Quick Update")}
+      >
         <QuickUpdatePanel compact onDone={() => setSheet(null)} />
       </Sheet>
-      <LangSheet open={sheet === 'lang'} onClose={() => setSheet(null)} />
-      <NotifSheet open={sheet === 'bell'} onClose={() => setSheet(null)} />
-      <BranchSheet open={sheet === 'branch'} onClose={() => setSheet(null)} />
+      <LangSheet open={sheet === "lang"} onClose={() => setSheet(null)} />
+      <NotifSheet open={sheet === "bell"} onClose={() => setSheet(null)} />
+      <BranchSheet open={sheet === "branch"} onClose={() => setSheet(null)} />
     </div>
   )
 }

@@ -168,7 +168,7 @@ export function TravelerThemeForm({ id, embedded, onDone, onBack }: FormProps) {
 
   const save = async () => {
     const status = { ...p.status, [id]: "done" as const }
-    setPrefs({
+    const preferenceResult = await setPrefs({
       ...p,
       status,
       lastTripAt:
@@ -176,6 +176,7 @@ export function TravelerThemeForm({ id, embedded, onDone, onBack }: FormProps) {
           ? new Date().toISOString()
           : p.lastTripAt,
     })
+    if (preferenceResult.error) return
     if (id === "about") {
       const result = await updateProfile(pr)
       if (result.error) {
@@ -184,17 +185,21 @@ export function TravelerThemeForm({ id, embedded, onDone, onBack }: FormProps) {
       }
     }
     if (id === "about") setProfile(pr)
-    if (id === "privacy") setConsent(c)
+    if (id === "privacy") {
+      const consentResult = await setConsent(c)
+      if (consentResult.error) return
+    }
     onDone("done")
   }
-  const skip = () => {
-    setPrefs((x) => ({
+  const skip = async () => {
+    const result = await setPrefs((x) => ({
       ...x,
       status: {
         ...x.status,
         [id]: x.status[id] === "done" ? "done" : "skipped",
       },
     }))
+    if (result.error) return
     onDone("skipped")
   }
 

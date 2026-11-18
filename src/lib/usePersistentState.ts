@@ -15,12 +15,13 @@ export function readStored<T>(key: string, fallback: T): T {
 export function usePersistentState<T>(key: string, initial: T) {
   const [value, setValue] = useState<T>(() => readStored(key, initial))
 
+  // I-sync sa localStorage kapag nagbago, para manatili ang preference sa reload.
   useEffect(() => {
     try {
       localStorage.setItem(PREFIX + key, JSON.stringify(value))
       window.dispatchEvent(new Event(SYNC_EVENT))
     } catch {
-      // storage full or unavailable: keep in-memory value
+      // Kapag puno o bawal ang storage, panatilihin ang in-memory value.
     }
   }, [key, value])
 
