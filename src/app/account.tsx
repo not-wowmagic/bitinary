@@ -22,6 +22,7 @@ import { AUTH_INTENT_KEY, AUTH_ROLE_KEY, resolveAuthRole } from "@/lib/authFlow"
 import { updatePassword as applyPasswordUpdate } from "@/lib/passwordAuth"
 
 import { useStore } from "@/app/store"
+import { useT } from "@/app/i18n"
 
 export type Role = "traveler" | "business"
 
@@ -613,6 +614,8 @@ export const normPH = (m?: string) =>
 export function AccountProvider({ children }: { children: ReactNode }) {
   const { showToast } = useStore()
 
+  const t = useT()
+
   const [session, setSession] = usePersistentState<Session>("session", null)
 
   const sessionRef = useRef(session)
@@ -840,8 +843,8 @@ export function AccountProvider({ children }: { children: ReactNode }) {
             showToast({
               text:
                 error instanceof Error
-                  ? `Could not load your saved preferences: ${error.message}`
-                  : "Could not load your saved preferences.",
+                  ? t(`Hindi ma-load ang naka-save mong preference: ${error.message}`, `Could not load your saved preferences: ${error.message}`)
+                  : t("Hindi ma-load ang naka-save mong preference.", "Could not load your saved preferences."),
               expression: "unsure",
             })
           } finally {
@@ -931,6 +934,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 
       setResume,
       showToast,
+      t,
     ],
   )
 
@@ -974,9 +978,9 @@ export function AccountProvider({ children }: { children: ReactNode }) {
           const message =
             error instanceof Error
               ? error.message
-              : "Could not save your preferences."
+              : t("Hindi ma-save ang preference mo.", "Could not save your preferences.")
           showToast({
-            text: `Could not save your preferences: ${message}`,
+            text: t(`Hindi ma-save ang preference mo: ${message}`, `Could not save your preferences: ${message}`),
             expression: "unsure",
           })
 
@@ -984,7 +988,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
         }
       })()
     },
-    [role, session, setStoredPrefs, showToast],
+    [role, session, setStoredPrefs, showToast, t],
   )
 
   const setConsent = useCallback(
@@ -1025,9 +1029,9 @@ export function AccountProvider({ children }: { children: ReactNode }) {
           const message =
             error instanceof Error
               ? error.message
-              : "Could not save your privacy settings."
+              : t("Hindi ma-save ang privacy settings mo.", "Could not save your privacy settings.")
           showToast({
-            text: `Could not save your privacy settings: ${message}`,
+            text: t(`Hindi ma-save ang privacy settings mo: ${message}`, `Could not save your privacy settings: ${message}`),
             expression: "unsure",
           })
 
@@ -1035,7 +1039,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
         }
       })()
     },
-    [role, session, setStoredConsent, showToast],
+    [role, session, setStoredConsent, showToast, t],
   )
 
   useEffect(() => {
@@ -1319,10 +1323,10 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       const message =
         error instanceof Error
           ? error.message
-          : "Browser cache could not be cleared."
+          : t("Hindi ma-clear ang cache ng browser.", "Browser cache could not be cleared.")
 
       return {
-        error: `Signed out, but Bitinary cache could not be cleared: ${message}`,
+        error: t(`Naka-sign out ka, pero hindi ma-clear ang cache ng Bitinary: ${message}`, `Signed out, but Bitinary cache could not be cleared: ${message}`),
 
         signedOut: true,
       }
@@ -1334,6 +1338,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     setRoleSelectionRequired,
     setSetupDone,
     setResume,
+    t,
   ])
 
   const updateProfile = useCallback(
@@ -1343,7 +1348,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       if (session?.kind !== "user" || !session.accountId)
         return {
           error:
-            "Na-save lang sa device. Mag-sign in para ma-sync sa database.",
+            t("Na-save lang sa device. Mag-sign in para ma-sync sa database.", "Saved on this device only. Sign in to sync with the database."),
         }
 
       const { error } = await supabase.from("profiles").upsert({
@@ -1381,7 +1386,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       return { error: null }
     },
 
-    [role, session, setProfile],
+    [role, session, setProfile, t],
   )
 
   const updatePassword = useCallback(

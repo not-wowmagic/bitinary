@@ -129,7 +129,7 @@ export function AccountHome() {
               {d.profile.name}
             </p>
             <p className="text-[15px] text-[#E8CDB9]">
-              Owner · {d.business.name}
+              {t("May-ari", "Owner")} · {d.business.name}
             </p>
           </div>
           <Button
@@ -193,7 +193,7 @@ export function AccountHome() {
           <GroupRow
             icon={<Tag size={19} />}
             color="#C84A00"
-            label="Deals"
+            label={t("Mga deal", "Deals")}
             value={
               !verified ? (
                 <Pill>{t("Naka-lock", "Locked")}</Pill>
@@ -1039,8 +1039,15 @@ export function ProfilePage() {
   )
 }
 
-const roleLabel = (r: Staff["role"]) =>
-  r === "owner" ? "Owner" : r === "manager" ? "Manager" : "Staff"
+const roleLabel = (
+  r: Staff["role"],
+  t: (tl: string, en: string) => string,
+) =>
+  r === "owner"
+    ? t("May-ari", "Owner")
+    : r === "manager"
+      ? t("Tagapamahala", "Manager")
+      : t("Staff", "Staff")
 
 export function TeamPage() {
   const { d, set, t, showToast } = useBiz()
@@ -1139,10 +1146,10 @@ export function TeamPage() {
                 <Pill tone="caution">{t("Inimbitahan", "Invited")}</Pill>
               )}
               {s.role === "owner" ? (
-                <Pill tone="orange">Owner</Pill>
+                <Pill tone="orange">{t("May-ari", "Owner")}</Pill>
               ) : (
                 <label className="relative">
-                  <span className="sr-only">Role</span>
+                  <span className="sr-only">{t("Papel", "Role")}</span>
                   <select
                     value={s.role}
                     onChange={(e) =>
@@ -1157,8 +1164,8 @@ export function TeamPage() {
                     }
                     className="h-11 appearance-none rounded-full border border-line bg-bg pl-4 pr-9 font-display text-[14px] font-medium"
                   >
-                    <option value="manager">Manager</option>
-                    <option value="staff">Staff</option>
+                    <option value="manager">{t("Tagapamahala", "Manager")}</option>
+                    <option value="staff">{t("Staff", "Staff")}</option>
                   </select>
                   <ChevronDown
                     size={16}
@@ -1181,7 +1188,7 @@ export function TeamPage() {
                 <th className="py-2 font-medium" />
                 {(["owner", "manager", "staff"] as const).map((r) => (
                   <th key={r} className="py-2 text-center font-medium">
-                    {roleLabel(r)}
+                    {roleLabel(r, t)}
                   </th>
                 ))}
               </tr>
@@ -1214,15 +1221,15 @@ export function TeamPage() {
         onClose={() => setInvite(false)}
         title={t("Mag-imbita sa pamamagitan ng link", "Invite by link")}
       >
-        <p className="mb-2 font-display text-[14px] font-medium">Role</p>
+        <p className="mb-2 font-display text-[14px] font-medium">{t("Papel", "Role")}</p>
         <Segmented<Staff["role"]>
           className="w-full"
           value={role}
           onChange={setRole}
           options={[
-            { value: "manager", label: "Manager" },
+            { value: "manager", label: t("Tagapamahala", "Manager") },
 
-            { value: "staff", label: "Staff" },
+            { value: "staff", label: t("Staff", "Staff") },
           ]}
         />
         <p className="mt-4 break-all rounded-[14px] bg-sunken p-3 font-mono text-[14px] dark:bg-elevated">
@@ -1390,7 +1397,7 @@ export function BillingPage() {
               <span className="flex-1 text-[15px] text-fg-2">
                 {s as string}
               </span>
-              {def && <Pill tone="ok">Default</Pill>}
+              {def && <Pill tone="ok">{t("Default", "Default")}</Pill>}
             </li>
           ))}
         </ul>
@@ -1494,15 +1501,15 @@ export function PreferencesPage() {
           value={mode}
           onChange={setMode}
           options={[
-            { value: "light", label: "Light" },
+            { value: "light", label: t("Maliwanag", "Light") },
 
-            { value: "dark", label: "Dark" },
+            { value: "dark", label: t("Madilim", "Dark") },
 
-            { value: "system", label: "System" },
+            { value: "system", label: t("Sundin ang device", "System") },
           ]}
         />
       </Card>
-      <Card title="Notifications" icon={<Bell size={20} />}>
+      <Card title={t("Mga abiso", "Notifications")} icon={<Bell size={20} />}>
         <ul className="divide-y divide-line">
           {([
             ["reviews", t("Bagong review", "New reviews")],
@@ -1540,11 +1547,11 @@ export function PreferencesPage() {
             set((x) => ({ ...x, prefs: { ...x.prefs, channel: c } }))
           }
           options={[
-            { value: "notif", label: "Notification" },
+            { value: "notif", label: t("Abiso", "Notification") },
 
-            { value: "messenger", label: "Messenger" },
+            { value: "messenger", label: t("Messenger", "Messenger") },
 
-            { value: "sms", label: "SMS" },
+            { value: "sms", label: t("SMS", "SMS") },
           ]}
         />
       </Card>
@@ -1704,18 +1711,18 @@ export function HelpPage() {
         <GroupRow
           icon={<MessageCircle size={19} />}
           color="#0B7F96"
-          label="Messenger"
+          label={t("Messenger", "Messenger")}
           value="m.me/bitinarybiz"
         />
         <GroupRow
           icon={<Mail size={19} />}
           color="#C84A00"
-          label="Email"
+          label={t("Email", "Email")}
           value="biz@bitinary.ph"
           onClick={() => (location.href = "mailto:biz@bitinary.ph")}
         />
       </Group>
-      <Card title="FAQs">
+      <Card title={t("Mga FAQ", "FAQs")}>
         <ul className="divide-y divide-line">
           {faqs.map(([q, a], i) => (
             <li key={q}>

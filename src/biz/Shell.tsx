@@ -394,9 +394,9 @@ function Sidebar({ onBranch }: { onBranch: () => void }) {
         <Jimbot crop="head" shape="squircle" size={36} />
         <div className="min-w-0 text-[13px]">
           <p className="truncate font-display font-semibold">
-            {d.profile.name || "Owner"}
+            {d.profile.name || t("May-ari", "Owner")}
           </p>
-          <p className="text-[#E8CDB9]">Owner</p>
+          <p className="text-[#E8CDB9]">{t("May-ari", "Owner")}</p>
         </div>
       </div>
     </aside>

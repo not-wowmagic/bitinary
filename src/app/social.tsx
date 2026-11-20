@@ -6,6 +6,7 @@ import { LINKED_PLACE_ID, placeById } from '@/data/places'
 import { readStored, usePersistentState } from '@/lib/usePersistentState'
 import { useAccount } from './account'
 import { useBizSnapshot, writeBiz } from './bizBridge'
+import { useT } from './i18n'
 
 /** Travelers' own reviews and comments for places without a business account, plus likes everywhere. */
 type SocialData = { reviews: FeedReview[]; comments: FeedComment[]; liked: string[] }
@@ -46,7 +47,7 @@ export function useSocialData() {
 
 export type ReviewInput = { stars: number; text: string; photos: string[]; visited: boolean }
 
-function mapBizPost(p: BizPost, placeId: string, d: BizData): FeedPost {
+function mapBizPost(p: BizPost, placeId: string, d: BizData, t: (tl: string, en: string) => string): FeedPost {
   const deal = p.dealId ? d.deals.find((x) => x.id === p.dealId) : undefined
   const boosted = d.boosts.some((b) => b.postId === p.id && b.status === 'active')
   const kind = p.type === 'reel' ? 'video' : p.type === 'blog' ? 'blog' : deal || boosted ? 'ad' : 'photo'
@@ -60,7 +61,7 @@ function mapBizPost(p: BizPost, placeId: string, d: BizData): FeedPost {
     at: p.at,
     likes: p.likes,
     comments: p.comments,
-    ad: kind === 'ad' ? { cta: 'Kunin ang deal', until: deal ? `Hanggang ${new Date(deal.end).toLocaleDateString('fil-PH', { month: 'short', day: 'numeric' })}` : 'Ngayong linggo' } : undefined,
+    ad: kind === 'ad' ? { cta: t('Kunin ang deal', 'Get the deal'), until: deal ? `${t('Hanggang', 'Until')} ${new Date(deal.end).toLocaleDateString('fil-PH', { month: 'short', day: 'numeric' })}` : t('Ngayong linggo', 'This week') } : undefined,
   }
 }
 
@@ -74,12 +75,13 @@ export function useBusinessFeed(placeId: string) {
   const { session, profile } = useAccount()
   const { data, set } = useSocial()
   const biz = useBizSnapshot()
+  const t = useT()
   const place = placeById(placeId)
   const linked = placeId === LINKED_PLACE_ID
   const me = session?.kind === 'user' ? session.accountId : undefined
-  const nick = profile.nickname || profile.name.split(' ')[0] || 'Biyahero'
+  const nick = profile.nickname || profile.name.split(' ')[0] || t('Biyahero', 'Traveler')
 
-  const posts = useMemo<FeedPost[]>(() => (linked ? biz.posts.filter((p) => p.status === 'published').map((p) => mapBizPost(p, placeId, biz)).sort(byNewest) : (seedFeedPosts[placeId] ?? [])), [linked, biz, placeId])
+  const posts = useMemo<FeedPost[]>(() => (linked ? biz.posts.filter((p) => p.status === 'published').map((p) => mapBizPost(p, placeId, biz, t)).sort(byNewest) : (seedFeedPosts[placeId] ?? [])), [linked, biz, placeId, t])
   const postIds = useMemo(() => new Set(posts.map((p) => p.id)), [posts])
 
   const comments = useMemo<FeedComment[]>(() => {

@@ -368,7 +368,7 @@ export function BizMethod() {
 
         if (error) {
           showToast({
-            text: `Could not save your account type: ${error.message}`,
+            text: t(`Hindi ma-save ang uri ng account mo: ${error.message}`, `Could not save your account type: ${error.message}`),
           })
 
           keepSignupIntent = true
@@ -403,7 +403,7 @@ export function BizMethod() {
     return () => {
       active = false
     }
-  }, [mode, navigate, set, showToast])
+  }, [mode, navigate, set, showToast, t])
 
   const google = async () => {
     sessionStorage.setItem(AUTH_INTENT_KEY, mode)
@@ -425,7 +425,7 @@ export function BizMethod() {
 
       sessionStorage.removeItem(AUTH_ROLE_KEY)
 
-      showToast({ text: `Google sign-in failed: ${error.message}` })
+      showToast({ text: t(`Hindi nagtagumpay ang pag-sign in sa Google: ${error.message}`, `Google sign-in failed: ${error.message}`) })
     }
   }
 
@@ -609,7 +609,7 @@ export function BizContact() {
       setErr(
         submitError instanceof Error
           ? submitError.message
-          : "Could not complete email authentication.",
+          : t("Hindi makumpleto ang email authentication.", "Could not complete email authentication."),
       )
     } finally {
       setBusy(false)
@@ -929,7 +929,7 @@ export function BizAuthCallback() {
           setError(
             sessionError instanceof Error
               ? sessionError.message
-              : "Could not verify the email.",
+              : t("Hindi ma-verify ang email.", "Could not verify the email."),
           )
 
           setChecking(false)
@@ -1065,7 +1065,7 @@ export function BizName() {
         <TextField
           label={t("Buong pangalan", "Full name")}
           value={p.name}
-          placeholder="Business Owner"
+          placeholder={t("May-ari ng negosyo", "Business Owner")}
           onChange={(e) => (setP({ name: e.target.value }), setErr(false))}
           error={err ? t("Ilagay ang pangalan mo.", "Enter your name.") : null}
         />
@@ -1073,7 +1073,7 @@ export function BizName() {
           label={t("Palayaw", "Nickname")}
           optional
           value={p.nickname}
-          placeholder="Business"
+          placeholder={t("Negosyo", "Business")}
           onChange={(e) => setP({ nickname: e.target.value })}
           hint={t(
             "Ganito ka babatiin ni Jimbot.",
