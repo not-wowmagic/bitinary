@@ -3,7 +3,6 @@ import OpenAI from "openai";
 import Ajv2020 from "ajv/dist/2020.js";
 import { SYSTEM_PROMPT } from "./system_prompt.ts";
 import {
-  estimateCostFromPriceRange,
   normalizeItineraryDraft,
   pickDiverseStops,
   type PlaceMeta,

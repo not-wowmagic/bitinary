@@ -8,6 +8,7 @@
     "prebuild": "npm run test:jimbot && npm run test:auth",
     "build": "vite build",
     "test:jimbot": "node tests/jimbot-intents.mjs",
+    "test:jimbot-ai": "node tests/jimbot-ai/parse-plan-hints.mjs && node tests/jimbot-ai/normalize-itinerary.mjs",
     "test:auth": "node tests/auth-flow.mjs",
     "preview": "vite preview",
     "format": "oxfmt"

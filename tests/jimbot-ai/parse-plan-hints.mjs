@@ -1,3 +1,5 @@
+import { pickDiverseStops } from "../../supabase/functions/jimbot/normalize.ts";
+
 /** Mirrors supabase/functions/jimbot/index.ts parsePlanHints for regression. */
 function parsePlanHints(message) {
   const raw = message ?? "";
@@ -44,41 +46,6 @@ function parsePlanHints(message) {
     foodTrip,
     overnight: /hotel|hostel|overnight|tulog|stay|magpalipas/i.test(raw),
   };
-}
-
-function pickDiverseStops(rows, limit = 5) {
-  if (rows.length <= limit) return rows.slice();
-  const typeBucket = (businessType) => {
-    const t = (businessType ?? "").toLowerCase();
-    if (/kapihan|cafe|coffee|tea/.test(t)) return "cafe";
-    if (/kainan|restaurant|food|resto|eatery|grill/.test(t)) return "food";
-    if (/attraction|pasyalan|museum|park|shop|mall|gallery|tour|activity/.test(t)) return "activity";
-    return "other";
-  };
-  const pools = { cafe: [], food: [], activity: [], other: [] };
-  for (const row of rows) pools[typeBucket(row.business_type)].push(row);
-  const picked = [];
-  const used = new Set();
-  const take = (bucket) => {
-    const next = pools[bucket].find((r) => !used.has(r.id));
-    if (!next || picked.length >= limit) return;
-    used.add(next.id);
-    picked.push(next);
-  };
-  take("cafe");
-  take("food");
-  take("activity");
-  take("food");
-  take("other");
-  take("cafe");
-  take("activity");
-  for (const row of rows) {
-    if (picked.length >= limit) break;
-    if (used.has(row.id)) continue;
-    used.add(row.id);
-    picked.push(row);
-  }
-  return picked;
 }
 
 const cases = [
@@ -130,8 +97,12 @@ const rows = [
   { id: "7", business_type: "kainan" },
   { id: "8", business_type: "other" },
 ];
-const picked = pickDiverseStops(rows, 5);
-const pickOk = picked.length === 5 && new Set(picked.map((p) => p.id)).size === 5;
+const picked = pickDiverseStops(rows, { days: 1 });
+const pickOk =
+  picked.length === 5 &&
+  new Set(picked.map((p) => p.id)).size === 5 &&
+  picked[0].business_type === "attraction" &&
+  picked[1].business_type === "kainan";
 console.log(`${pickOk ? "ok" : "FAIL"}  pickDiverseStops`, picked.map((p) => `${p.id}:${p.business_type}`));
 if (!pickOk) failed += 1;
 

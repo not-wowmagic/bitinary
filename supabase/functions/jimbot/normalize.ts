@@ -54,6 +54,7 @@ type Bucket = "cafe" | "food" | "activity" | "stay" | "other";
 
 export const MAX_DAYS = 14;
 const DAY_START_MIN = 9 * 60;
+const LAST_START_MIN = 21 * 60 + 30;
 const VISIT_MIN: Record<Bucket, number> = { activity: 120, food: 75, cafe: 45, other: 90, stay: 60 };
 const DEFAULT_TRAVEL_MIN = 30;
 
@@ -75,25 +76,24 @@ export function maxSynthStops(days = 1, foodTrip = false, overnight = false): nu
   return clampDays(days) * dayCaps(foodTrip).stops + (overnight ? 1 : 0);
 }
 
-export function estimateCostFromPriceRange(priceRange: string | null): number {
-  if (!priceRange) return 300;
-  const normalized = priceRange.toLowerCase();
-  if (normalized.includes("₱") && normalized.includes("-")) {
-    const numbers = [...normalized.matchAll(/(\d{2,6})/g)].map((m) => Number(m[1]));
-    if (numbers.length >= 2) {
-      return Math.round((numbers[0] + numbers[1]) / 2);
-    }
-  }
-  if (normalized.includes("cheap") || normalized.includes("budget")) return 200;
-  if (normalized.includes("mid")) return 500;
-  if (normalized.includes("lux") || normalized.includes("high")) return 1200;
-  return 350;
+/**
+ * Peso amount from a listed price: "₱350", "PHP 500", "200-400", "₱1,200 - ₱2,000" (range → midpoint).
+ * Category words ("mid", "cheap", "₱₱") and "contact for price" are not prices → null.
+ */
+export function parseListedPrice(priceRange: string | null | undefined): number | null {
+  if (!priceRange) return null;
+  const text = priceRange.replace(/(\d),(\d{3})/g, "$1$2");
+  const amount = String.raw`(?:₱|php|p)?\s*(\d{2,7})(?:\.\d+)?\s*(?:php|pesos?)?`;
+  const match = text.match(new RegExp(String.raw`^\s*${amount}(?:\s*(?:-|–|to)\s*${amount})?(?:\s*(?:\/|per|kada)?\s*(?:pax|person|head|night|tao))?\s*$`, "i"));
+  if (!match) return null;
+  const low = Number(match[1]);
+  const high = match[2] ? Number(match[2]) : low;
+  if (!Number.isFinite(low) || !Number.isFinite(high) || high < low) return null;
+  return Math.round((low + high) / 2);
 }
 
-/** Cost only when the business lists a price range; unknown stays null. */
-function listedCost(meta: PlaceMeta | undefined, fallback: number | null): number | null {
-  if (!meta) return typeof fallback === "number" && fallback >= 0 ? fallback : null;
-  return meta.price_range ? estimateCostFromPriceRange(meta.price_range) : null;
+function listedCost(meta: PlaceMeta | undefined): number | null {
+  return parseListedPrice(meta?.price_range);
 }
 
 function clampDays(days: number | undefined): number {
@@ -204,8 +204,7 @@ function arrangeDay(ids: string[], bucketOf: (id: string) => Bucket, foodTrip: b
 }
 
 function fmtTime(min: number): string {
-  const clamped = Math.min(min, 23 * 60 + 59);
-  return `${String(Math.floor(clamped / 60)).padStart(2, "0")}:${String(clamped % 60).padStart(2, "0")}`;
+  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 }
 
 function roundUp15(min: number): number {
@@ -303,28 +302,38 @@ export function normalizeItineraryDraft(input: {
   }
   if (pending.length > 0) warnings.push("May ilang places na hindi na isinama para hindi siksik ang araw.");
 
+  let overflow = 0;
   const outDays = dayBuckets.map((ids, idx) => {
     const arranged = arrangeDay(ids, bucketOf, foodTrip);
     let cursor = DAY_START_MIN;
     let mealIdx = 0;
-    const stops: DraftStop[] = arranged.map((id, i) => {
+    let prevId: string | null = null;
+    const stops: DraftStop[] = [];
+    for (const id of arranged) {
       const b = bucketOf(id);
-      if (i > 0) {
-        const prev = arranged[i - 1];
-        cursor = roundUp15(cursor + VISIT_MIN[bucketOf(prev)] + travelMinutes(metaById.get(prev), metaById.get(id)));
-      }
+      let start = prevId == null
+        ? DAY_START_MIN
+        : roundUp15(cursor + VISIT_MIN[bucketOf(prevId)] + travelMinutes(metaById.get(prevId), metaById.get(id)));
       if (b === "food" && !foodTrip) {
         const floor = mealIdx === 0 ? 11 * 60 + 30 : 18 * 60;
-        if (cursor < floor) cursor = floor;
-        mealIdx += 1;
+        if (start < floor) start = floor;
       }
+      // Past the last sensible start time the stop doesn't fit this day; skip it rather than stack times.
+      if (start > LAST_START_MIN) {
+        overflow += 1;
+        continue;
+      }
+      if (b === "food" && !foodTrip) mealIdx += 1;
+      cursor = start;
+      prevId = id;
       const prior = incoming.get(id);
       const meta = metaById.get(id);
       const note = (prior?.note ?? meta?.business_type ?? null)?.slice(0, 80) ?? null;
-      return { time: fmtTime(cursor), businessId: id, note, estCost: listedCost(meta, prior?.estCost ?? null) };
-    });
+      stops.push({ time: fmtTime(start), businessId: id, note, estCost: listedCost(meta) });
+    }
     return { day: idx + 1, stops };
   });
+  if (overflow > 0) warnings.push("May ilang places na hindi na kasya sa oras ng araw kaya inalis muna.");
 
   const outDraft: ItineraryDraft = {
     title: draft.title,
@@ -346,7 +355,7 @@ export function normalizeItineraryDraft(input: {
     }
   }
   if (lodgingBusinessId) {
-    const cost = listedCost(metaById.get(lodgingBusinessId), null);
+    const cost = listedCost(metaById.get(lodgingBusinessId));
     if (cost != null) lines.push({ label: `${labelFor(lodgingBusinessId)} (stay)`, amount: cost, businessId: lodgingBusinessId });
   }
   const total = lines.reduce((sum, l) => sum + l.amount, 0);

@@ -1,5 +1,7 @@
+import * as normalize from '../../supabase/functions/jimbot/normalize.ts'
 import { normalizeItineraryDraft, pickDiverseStops } from '../../supabase/functions/jimbot/normalize.ts'
 
+const parseListedPrice = normalize.parseListedPrice ?? (() => undefined)
 let failed = 0
 function check(name, ok, detail) {
   console.log(`${ok ? 'ok' : 'FAIL'}  normalize/${name}`, ok ? '' : detail ?? '')
@@ -101,6 +103,40 @@ const timesOk = (draft) =>
   check('budget total from known costs', r.budgetPatch.total === 2000 && r.budgetPatch.lines.length === 2, r.budgetPatch)
   check('budget limit + perPerson', r.budgetPatch.limit === 1000 && r.budgetPatch.perPerson === 1000 && r.budgetPatch.isEstimate === true, r.budgetPatch)
   check('over budget warned', r.warnings.some((w) => /over budget/i.test(w)), r.warnings)
+}
+
+// Only parseable peso amounts count as listed prices.
+{
+  const cases = [
+    ['mid', null], ['cheap', null], ['contact for price', null], ['₱₱', null], ['', null], [null, null],
+    ['₱350', 350], ['PHP 500', 500], ['200-400', 300], ['₱1,200 - ₱2,000', 1600], ['₱300/pax', 300],
+  ]
+  const bad = cases.filter(([raw, want]) => parseListedPrice(raw) !== want)
+  check('parseListedPrice', bad.length === 0, bad.map(([raw]) => [raw, parseListedPrice(raw)]))
+
+  const meta = [
+    biz('a1', 'attraction', { price_range: 'mid' }),
+    biz('f1', 'kainan', { price_range: 'contact for price' }),
+    biz('a2', 'museum', { price_range: '₱250' }),
+  ]
+  const draft = draftOf(['a1', 'f1', 'a2', 'ghost'])
+  draft.days[0].stops.find((s) => s.businessId === 'ghost').estCost = 999
+  const r = normalizeItineraryDraft({ draft, placesMeta: meta, hints: {} })
+  const cost = (id) => r.draft.days[0].stops.find((s) => s.businessId === id)?.estCost
+  check('category/contact prices are null', cost('a1') === null && cost('f1') === null, r.draft.days[0].stops)
+  check('model estCost without meta not kept', cost('ghost') === null, r.draft.days[0].stops)
+  check('budget only from parseable prices', r.budgetPatch.total === 250 && r.budgetPatch.lines.length === 1, r.budgetPatch)
+}
+
+// Long travel overflows the day: times stay strictly increasing and never pile up at day end.
+{
+  const far = (i) => ({ latitude: 5 + i * 3, longitude: 121.0 })
+  const meta = Array.from({ length: 5 }, (_, i) => biz(`x${i}`, 'attraction', far(i)))
+  const r = normalizeItineraryDraft({ draft: draftOf(meta.map((m) => m.id)), placesMeta: meta, hints: {} })
+  const times = r.draft.days[0].stops.map((s) => s.time)
+  check('overflow times strictly increasing', timesOk(r.draft), times)
+  check('overflow within day', times.every((t) => toMin(t) <= 21 * 60 + 30) && new Set(times).size === times.length, times)
+  check('overflow warned', times.length < 5 && r.warnings.some((w) => /kasya/.test(w)), { times, warnings: r.warnings })
 }
 
 // Geographic clustering across days.
