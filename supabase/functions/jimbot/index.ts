@@ -137,6 +137,47 @@ Deno.serve(async (req) => {
     }
   }
 
+  const toolContext: ToolContext = {
+    supabase,
+    userId,
+    trustedBusinessIds,
+    requestConfirmedSave: body.explicitConfirmed === true,
+    idempotencyKey: idempotencyKey ?? null,
+    userMessage: body.message,
+    savedItineraryId: null,
+  };
+
+  // Deterministic save: don't rely on the model calling save_itinerary.
+  if (body.explicitConfirmed === true) {
+    const saved = await saveFromPlanningContext(body.planningContext ?? null, toolContext);
+    if (saved.ok && typeof saved.itineraryId === "string") {
+      const ctx = body.planningContext ?? {};
+      return jsonResponse({
+        message: "Saved na ang itinerary mo! Tingnan mo sa itinerary page.",
+        quickReplies: ["Mag-plan ulit", "Tingnan ang budget"],
+        places: Array.isArray((ctx as any).places) ? (ctx as any).places : [],
+        itineraryDraft: (ctx as any).itineraryDraft ?? null,
+        budget: (ctx as any).budget ?? null,
+        map: (ctx as any).map ?? { businessIds: [] },
+        actions: [],
+        warnings: [],
+        refusal: null,
+        savedItineraryId: saved.itineraryId,
+      }, 200);
+    }
+    return jsonResponse({
+      message: saved.message ?? "Hindi ko ma-save ang itinerary ngayon. Subukan ulit.",
+      quickReplies: ["Subukan ulit", "Mag-plan ulit"],
+      places: [],
+      itineraryDraft: (body.planningContext as any)?.itineraryDraft ?? null,
+      budget: (body.planningContext as any)?.budget ?? null,
+      map: (body.planningContext as any)?.map ?? { businessIds: [] },
+      actions: [{ type: "confirm_save", label: "I-save ulit", businessId: null }],
+      warnings: [saved.message ?? "Save failed"],
+      refusal: null,
+    }, 200);
+  }
+
   if (!openai) {
     console.error("jimbot: OPENAI_API_KEY missing");
     return jsonResponse(FALLBACK_RESPONSE, 200);
@@ -160,17 +201,8 @@ Deno.serve(async (req) => {
       },
     });
 
-    const toolContext: ToolContext = {
-      supabase,
-      userId,
-      trustedBusinessIds,
-      requestConfirmedSave: body.explicitConfirmed === true,
-      idempotencyKey: idempotencyKey ?? null,
-      userMessage: body.message,
-      savedItineraryId: null,
-    };
-
     let earlyPlan: Record<string, unknown> | null = null;
+    // Skip early synth on save confirms (handled above); keep for normal plan asks.
     const wantsPlan = looksLikePlanRequest(body.message);
 
     for (let i = 0; i < MAX_TOOL_ROUNDS; i += 1) {
@@ -748,58 +780,36 @@ async function showMapPoints(args: Record<string, unknown>, context: ToolContext
   };
 }
 
-async function saveItinerary(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
+type NormalizedSaveStop = {
+  businessId: string;
+  stopTime: string;
+  kind: string;
+  costPhp: number;
+  note: string | null;
+};
+
+async function persistItinerary(
+  context: ToolContext,
+  input: { title: string; area: string; budgetPhp: number; stops: NormalizedSaveStop[] },
+): Promise<ToolResult> {
   if (!context.userId) {
-    return { ok: false, code: "unauthenticated", message: "Sign in is required to save" };
+    return { ok: false, code: "unauthenticated", message: "Mag-sign in muna para ma-save ang itinerary." };
+  }
+  if (!input.title || !input.area || input.stops.length === 0) {
+    return { ok: false, code: "invalid_argument", message: "Walang draft na puwedeng i-save. Mag-plan muna." };
   }
 
-  if (context.requestConfirmedSave !== true || args.explicitConfirmed !== true) {
-    return {
-      ok: false,
-      code: "forbidden",
-      message: "Save blocked: explicitConfirmed must be true in request and model tool call",
-    };
-  }
-
-  const title = typeof args.title === "string" ? args.title.trim() : "";
-  const area = typeof args.area === "string" ? args.area.trim() : "";
-  const budgetPhp = typeof args.budgetPhp === "number" ? Math.max(0, args.budgetPhp) : 0;
-  const stops = Array.isArray(args.stops) ? args.stops : [];
-
-  if (!title || !area || stops.length === 0) {
-    return { ok: false, code: "invalid_argument", message: "title, area, and stops are required" };
-  }
-
-  const normalizedStops: Array<{
-    businessId: string;
-    stopTime: string;
-    kind: string;
-    costPhp: number;
-    note: string | null;
-  }> = [];
-
-  for (const stop of stops) {
-    if (!stop || typeof stop !== "object") {
-      return { ok: false, code: "invalid_argument", message: "Invalid stop payload" };
-    }
-    const businessId = typeof stop.businessId === "string" ? stop.businessId : "";
-    if (!businessId || !context.trustedBusinessIds.has(businessId)) {
+  for (const stop of input.stops) {
+    if (!stop.businessId || !context.trustedBusinessIds.has(stop.businessId)) {
       return { ok: false, code: "invalid_argument", message: "Stop businessId is not trusted" };
     }
-    normalizedStops.push({
-      businessId,
-      stopTime: typeof stop.stopTime === "string" ? stop.stopTime : "",
-      kind: typeof stop.kind === "string" ? stop.kind : "stop",
-      costPhp: typeof stop.costPhp === "number" ? Math.max(0, stop.costPhp) : 0,
-      note: typeof stop.note === "string" ? stop.note : null,
-    });
   }
 
   const verifiedBusinessIds = await fetchVerifiedBusinessIdSet(
     context.supabase,
-    normalizedStops.map((s) => s.businessId),
+    input.stops.map((s) => s.businessId),
   );
-  if (verifiedBusinessIds.size !== normalizedStops.length) {
+  if (verifiedBusinessIds.size !== input.stops.length) {
     return { ok: false, code: "invalid_argument", message: "Some businesses are no longer valid verified listings" };
   }
 
@@ -818,19 +828,20 @@ async function saveItinerary(args: Record<string, unknown>, context: ToolContext
     .from("itineraries")
     .insert({
       user_id: context.userId,
-      title,
-      area,
-      budget: budgetPhp,
+      title: input.title,
+      area: input.area,
+      budget: input.budgetPhp,
       is_saved: true,
     })
     .select("id,title,area,budget,created_at")
     .single();
 
   if (itineraryError || !itinerary) {
+    console.error("jimbot: itinerary insert failed", itineraryError?.message);
     return { ok: false, code: "internal_error", message: "Failed to save itinerary" };
   }
 
-  const stopRows = normalizedStops.map((stop, index) => ({
+  const stopRows = input.stops.map((stop, index) => ({
     itinerary_id: itinerary.id,
     business_id: stop.businessId,
     stop_time: stop.stopTime || `${String(9 + index * 2).padStart(2, "0")}:00`,
@@ -843,6 +854,7 @@ async function saveItinerary(args: Record<string, unknown>, context: ToolContext
 
   const { error: stopsError } = await context.supabase.from("itinerary_stops").insert(stopRows);
   if (stopsError) {
+    console.error("jimbot: itinerary_stops insert failed", stopsError.message);
     await context.supabase.from("itineraries").delete().eq("id", itinerary.id).eq("user_id", context.userId);
     return { ok: false, code: "internal_error", message: "Failed to save itinerary stops" };
   }
@@ -865,6 +877,110 @@ async function saveItinerary(args: Record<string, unknown>, context: ToolContext
 
   context.savedItineraryId = String(itinerary.id);
   return { ok: true, ...responsePayload };
+}
+
+/** Save the client's last draft without requiring the model to call save_itinerary. */
+async function saveFromPlanningContext(
+  planningContext: Json | null,
+  context: ToolContext,
+): Promise<ToolResult> {
+  if (!context.userId) {
+    return { ok: false, code: "unauthenticated", message: "Mag-sign in muna para ma-save ang itinerary." };
+  }
+  if (!context.requestConfirmedSave) {
+    return { ok: false, code: "forbidden", message: "Save blocked: explicitConfirmed required" };
+  }
+
+  const draft = (planningContext as any)?.itineraryDraft;
+  const budget = (planningContext as any)?.budget;
+  if (!draft || !Array.isArray(draft.days)) {
+    return { ok: false, code: "invalid_argument", message: "Walang draft na puwedeng i-save. Mag-plan muna." };
+  }
+
+  const stops: NormalizedSaveStop[] = [];
+  const seen = new Set<string>();
+  for (const day of draft.days) {
+    if (!Array.isArray(day?.stops)) continue;
+    for (const stop of day.stops) {
+      const businessId = typeof stop?.businessId === "string" ? stop.businessId : "";
+      if (!businessId || seen.has(businessId)) continue;
+      seen.add(businessId);
+      stops.push({
+        businessId,
+        stopTime: typeof stop.time === "string" ? stop.time : "",
+        kind: typeof stop.note === "string" ? stop.note : "stop",
+        costPhp: typeof stop.estCost === "number" ? Math.max(0, stop.estCost) : 0,
+        note: typeof stop.note === "string" ? stop.note : null,
+      });
+    }
+  }
+  const lodgingId = typeof draft.lodgingBusinessId === "string" ? draft.lodgingBusinessId : null;
+  if (lodgingId && !seen.has(lodgingId)) {
+    stops.push({
+      businessId: lodgingId,
+      stopTime: "Check-in",
+      kind: "stay",
+      costPhp: 0,
+      note: "lodging",
+    });
+  }
+
+  // Re-verify any draft IDs that weren't already trusted (e.g. empty context seed).
+  for (const id of await fetchVerifiedBusinessIdSet(context.supabase, stops.map((s) => s.businessId))) {
+    context.trustedBusinessIds.add(id);
+  }
+
+  const area =
+    (typeof draft.area === "string" && draft.area.trim()) ||
+    (typeof (planningContext as any)?.places?.[0]?.city === "string" && (planningContext as any).places[0].city) ||
+    "Biyahe";
+  const title =
+    (typeof draft.title === "string" && draft.title.trim()) ||
+    `${Array.isArray(draft.days) ? draft.days.length : 1}-day ${area} plan`;
+  const budgetPhp =
+    typeof budget?.total === "number"
+      ? Math.max(0, budget.total)
+      : typeof budget?.limit === "number"
+        ? Math.max(0, budget.limit)
+        : 0;
+
+  return persistItinerary(context, { title, area, budgetPhp, stops });
+}
+
+async function saveItinerary(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
+  if (!context.userId) {
+    return { ok: false, code: "unauthenticated", message: "Mag-sign in muna para ma-save ang itinerary." };
+  }
+
+  if (context.requestConfirmedSave !== true || args.explicitConfirmed !== true) {
+    return {
+      ok: false,
+      code: "forbidden",
+      message: "Save blocked: explicitConfirmed must be true in request and model tool call",
+    };
+  }
+
+  const title = typeof args.title === "string" ? args.title.trim() : "";
+  const area = typeof args.area === "string" ? args.area.trim() : "";
+  const budgetPhp = typeof args.budgetPhp === "number" ? Math.max(0, args.budgetPhp) : 0;
+  const stops = Array.isArray(args.stops) ? args.stops : [];
+
+  const normalizedStops: NormalizedSaveStop[] = [];
+  for (const stop of stops) {
+    if (!stop || typeof stop !== "object") {
+      return { ok: false, code: "invalid_argument", message: "Invalid stop payload" };
+    }
+    const businessId = typeof stop.businessId === "string" ? stop.businessId : "";
+    normalizedStops.push({
+      businessId,
+      stopTime: typeof stop.stopTime === "string" ? stop.stopTime : "",
+      kind: typeof stop.kind === "string" ? stop.kind : "stop",
+      costPhp: typeof stop.costPhp === "number" ? Math.max(0, stop.costPhp) : 0,
+      note: typeof stop.note === "string" ? stop.note : null,
+    });
+  }
+
+  return persistItinerary(context, { title, area, budgetPhp, stops: normalizedStops });
 }
 
 function cleanupIdempotencyStore() {
@@ -1320,6 +1436,9 @@ function collectBusinessIds(payload: any): string[] {
         if (typeof stop?.businessId === "string") ids.add(stop.businessId);
       }
     }
+  }
+  if (typeof payload?.itineraryDraft?.lodgingBusinessId === "string") {
+    ids.add(payload.itineraryDraft.lodgingBusinessId);
   }
 
   if (Array.isArray(payload?.budget?.lines)) {

@@ -263,12 +263,16 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
           } else {
             navigate(`/itinerary/${ai.savedItineraryId}`)
           }
+        } else if (opts.explicitConfirmed) {
+          // Server returned a chat reply without an id (auth/draft error). Keep user on chat.
+          pendingShare.current = false
         }
         return
       }
 
       const failText = opts.explicitConfirmed ? SAVE_FAIL_TEXT : OFFLINE_TEXT
       pushOffline(failText)
+      pendingShare.current = false
       await saveMessage('bot', failText, 'offline')
     } catch (error) {
       console.error('Jimbot request failed', error)
