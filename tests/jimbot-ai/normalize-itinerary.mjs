@@ -2,6 +2,8 @@ import * as normalize from '../../supabase/functions/jimbot/normalize.ts'
 import { normalizeItineraryDraft, pickDiverseStops } from '../../supabase/functions/jimbot/normalize.ts'
 
 const parseListedPrice = normalize.parseListedPrice ?? (() => undefined)
+const medianMenuPrice = normalize.medianMenuPrice ?? (() => undefined)
+const resolveStopCost = normalize.resolveStopCost ?? (() => undefined)
 let failed = 0
 function check(name, ok, detail) {
   console.log(`${ok ? 'ok' : 'FAIL'}  normalize/${name}`, ok ? '' : detail ?? '')
@@ -101,7 +103,7 @@ const timesOk = (draft) =>
   const a1 = r.draft.days[0].stops.find((s) => s.businessId === 'a1')
   check('unknown cost stays null', a1?.estCost === null, a1)
   check('budget total from known costs', r.budgetPatch.total === 2000 && r.budgetPatch.lines.length === 2, r.budgetPatch)
-  check('budget limit + perPerson', r.budgetPatch.limit === 1000 && r.budgetPatch.perPerson === 1000 && r.budgetPatch.isEstimate === true, r.budgetPatch)
+  check('budget limit + perPerson', r.budgetPatch.limit === 1000 && r.budgetPatch.perPerson === 1000 && r.budgetPatch.isEstimate === false, r.budgetPatch)
   check('over budget warned', r.warnings.some((w) => /over budget/i.test(w)), r.warnings)
 }
 
@@ -126,6 +128,35 @@ const timesOk = (draft) =>
   check('category/contact prices are null', cost('a1') === null && cost('f1') === null, r.draft.days[0].stops)
   check('model estCost without meta not kept', cost('ghost') === null, r.draft.days[0].stops)
   check('budget only from parseable prices', r.budgetPatch.total === 250 && r.budgetPatch.lines.length === 1, r.budgetPatch)
+}
+
+// Menu median fills cost when price_range is only a chip; listed range still wins.
+{
+  check('medianMenuPrice empty', medianMenuPrice([]) === null && medianMenuPrice(undefined) === null)
+  check('medianMenuPrice odd', medianMenuPrice([100, 300, 200]) === 200)
+  check('medianMenuPrice even', medianMenuPrice([100, 300]) === 200)
+
+  const listedWins = resolveStopCost({ id: 'x', business_type: 'kainan', price_range: '₱400', menuPrices: [100, 900] })
+  check('listed price_range wins over menu', listedWins.amount === 400 && listedWins.costState === 'listed', listedWins)
+
+  const fromMenu = resolveStopCost({ id: 'x', business_type: 'kainan', price_range: '₱₱', menuPrices: [180, 280, 380] })
+  check('menu median when chip range', fromMenu.amount === 280 && fromMenu.costState === 'estimated', fromMenu)
+
+  const unknown = resolveStopCost({ id: 'x', business_type: 'kainan', price_range: '₱₱', menuPrices: [] })
+  check('chip + no menu → unknown', unknown.amount === null && unknown.costState === 'unknown', unknown)
+
+  const meta = [
+    biz('a1', 'attraction', { price_range: '₱₱' }),
+    biz('f1', 'kainan', { price_range: '₱₱', menuPrices: [250, 350, 450] }),
+    biz('c1', 'kapihan', { price_range: '₱', menuPrices: [90, 120] }),
+  ]
+  const r = normalizeItineraryDraft({ draft: draftOf(meta.map((m) => m.id)), placesMeta: meta, hints: {} })
+  const cost = (id) => r.draft.days[0].stops.find((s) => s.businessId === id)
+  check('menu estCost on food stop', cost('f1')?.estCost === 350 && cost('f1')?.costState === 'estimated', cost('f1'))
+  check('menu estCost on cafe', cost('c1')?.estCost === 105 && cost('c1')?.costState === 'estimated', cost('c1'))
+  check('attraction without menu stays unknown', cost('a1')?.estCost === null && cost('a1')?.costState === 'unknown', cost('a1'))
+  check('budget includes menu estimates', r.budgetPatch.total === 455 && r.budgetPatch.isEstimate === true, r.budgetPatch)
+  check('budget lines mark estimated', r.budgetPatch.lines.every((l) => l.costState === 'estimated'), r.budgetPatch.lines)
 }
 
 // Long travel overflows the day: times stay strictly increasing and never pile up at day end.

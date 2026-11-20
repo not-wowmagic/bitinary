@@ -10,6 +10,8 @@ export type PlanHints = {
   overnight?: boolean;
 };
 
+export type CostState = "listed" | "estimated" | "unknown";
+
 export type PlaceMeta = {
   id: string;
   name?: string | null;
@@ -18,6 +20,8 @@ export type PlaceMeta = {
   city?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  /** Owner-posted menu_items.price values (biz Backgrounds). Used when price_range is not a peso amount. */
+  menuPrices?: number[];
 };
 
 export type DraftStop = {
@@ -25,6 +29,7 @@ export type DraftStop = {
   businessId: string;
   note: string | null;
   estCost: number | null;
+  costState?: CostState;
 };
 
 export type ItineraryDraft = {
@@ -40,7 +45,7 @@ export type BudgetPatch = {
   total: number;
   perPerson: number | null;
   isEstimate: boolean;
-  lines: Array<{ label: string; amount: number; businessId: string | null }>;
+  lines: Array<{ label: string; amount: number; businessId: string | null; costState?: CostState }>;
 };
 
 export type NormalizeResult = {
@@ -92,8 +97,29 @@ export function parseListedPrice(priceRange: string | null | undefined): number 
   return Math.round((low + high) / 2);
 }
 
-function listedCost(meta: PlaceMeta | undefined): number | null {
-  return parseListedPrice(meta?.price_range);
+/** Median of numeric menu prices; null when empty. */
+export function medianMenuPrice(prices: number[] | null | undefined): number | null {
+  const nums = (prices ?? []).filter((n) => typeof n === "number" && Number.isFinite(n) && n >= 0);
+  if (nums.length === 0) return null;
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? Math.round(sorted[mid])
+    : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+/**
+ * Traveler stop cost sources (in order):
+ * 1) businesses.price_range when it parses as pesos (owner chip or free text with numbers)
+ * 2) median of owner-posted menu_items.price from biz Backgrounds / menu
+ * 3) unknown — do not invent amounts from ₱/₱₱ chips alone
+ */
+export function resolveStopCost(meta: PlaceMeta | undefined): { amount: number | null; costState: CostState } {
+  const listed = parseListedPrice(meta?.price_range);
+  if (listed != null) return { amount: listed, costState: "listed" };
+  const fromMenu = medianMenuPrice(meta?.menuPrices);
+  if (fromMenu != null) return { amount: fromMenu, costState: "estimated" };
+  return { amount: null, costState: "unknown" };
 }
 
 function clampDays(days: number | undefined): number {
@@ -329,7 +355,14 @@ export function normalizeItineraryDraft(input: {
       const prior = incoming.get(id);
       const meta = metaById.get(id);
       const note = (prior?.note ?? meta?.business_type ?? null)?.slice(0, 80) ?? null;
-      stops.push({ time: fmtTime(start), businessId: id, note, estCost: listedCost(meta) });
+      const cost = resolveStopCost(meta);
+      stops.push({
+        time: fmtTime(start),
+        businessId: id,
+        note,
+        estCost: cost.amount,
+        costState: cost.costState,
+      });
     }
     return { day: idx + 1, stops };
   });
@@ -349,14 +382,30 @@ export function normalizeItineraryDraft(input: {
   );
   const labelFor = (id: string) => metaById.get(id)?.name ?? prevLabel.get(id) ?? "Stop";
   const lines: BudgetPatch["lines"] = [];
+  let hasEstimate = false;
   for (const day of outDays) {
     for (const s of day.stops) {
-      if (s.estCost != null) lines.push({ label: labelFor(s.businessId), amount: s.estCost, businessId: s.businessId });
+      if (s.estCost == null) continue;
+      if (s.costState === "estimated") hasEstimate = true;
+      lines.push({
+        label: labelFor(s.businessId),
+        amount: s.estCost,
+        businessId: s.businessId,
+        costState: s.costState === "unknown" ? undefined : s.costState,
+      });
     }
   }
   if (lodgingBusinessId) {
-    const cost = listedCost(metaById.get(lodgingBusinessId));
-    if (cost != null) lines.push({ label: `${labelFor(lodgingBusinessId)} (stay)`, amount: cost, businessId: lodgingBusinessId });
+    const stayCost = resolveStopCost(metaById.get(lodgingBusinessId));
+    if (stayCost.amount != null) {
+      if (stayCost.costState === "estimated") hasEstimate = true;
+      lines.push({
+        label: `${labelFor(lodgingBusinessId)} (stay)`,
+        amount: stayCost.amount,
+        businessId: lodgingBusinessId,
+        costState: stayCost.costState === "unknown" ? undefined : stayCost.costState,
+      });
+    }
   }
   const total = lines.reduce((sum, l) => sum + l.amount, 0);
   const limit = hints.budgetPhp ?? input.previousBudget?.limit ?? null;
@@ -366,7 +415,7 @@ export function normalizeItineraryDraft(input: {
     limit,
     total,
     perPerson: people && people >= 2 ? Math.round(total / people) : null,
-    isEstimate: true,
+    isEstimate: hasEstimate || lines.length === 0,
     lines,
   };
   if (limit != null && total > limit) warnings.push("Plan is currently over budget.");

@@ -679,12 +679,8 @@ async function buildItineraryDraft(args: Record<string, unknown>, context: ToolC
     return { ok: false, code: "not_found", message: "No valid verified business IDs" };
   }
 
-  const { data: businesses, error } = await context.supabase
-    .from("businesses")
-    .select(PLACE_META_COLUMNS)
-    .in("id", validIds);
-
-  if (error || !businesses) {
+  const placesMeta = await fetchPlaceMeta(context.supabase, validIds);
+  if (placesMeta.length === 0) {
     return { ok: false, code: "tool_unavailable", message: "Failed to load businesses for draft" };
   }
 
@@ -698,7 +694,7 @@ async function buildItineraryDraft(args: Record<string, unknown>, context: ToolC
         stops: validIds.map((id) => ({ time: null, businessId: id, note: null, estCost: null })),
       }],
     },
-    placesMeta: businesses as PlaceMeta[],
+    placesMeta,
     hints: { ...userHints, days, budgetPhp: budgetPhp ?? userHints.budgetPhp },
   });
 
@@ -902,10 +898,44 @@ async function fetchBusinessNames(supabase: SupabaseClient, businessIds: string[
 
 const PLACE_META_COLUMNS = "id,name,business_type,price_range,city,latitude,longitude";
 
+/** Owner-posted menu_items prices keyed by business_id (public RLS). */
+async function fetchMenuPricesByBusinessIds(
+  supabase: SupabaseClient,
+  businessIds: string[],
+): Promise<Map<string, number[]>> {
+  const out = new Map<string, number[]>();
+  if (businessIds.length === 0) return out;
+  const { data, error } = await supabase
+    .from("menu_items")
+    .select("business_id, price")
+    .in("business_id", businessIds);
+  if (error || !data) {
+    if (error) console.error("jimbot: menu_items fetch failed", error.message);
+    return out;
+  }
+  for (const row of data) {
+    const id = String(row.business_id);
+    const price = Number(row.price);
+    if (!Number.isFinite(price) || price < 0) continue;
+    const list = out.get(id) ?? [];
+    list.push(price);
+    out.set(id, list);
+  }
+  return out;
+}
+
 async function fetchPlaceMeta(supabase: SupabaseClient, businessIds: string[]): Promise<PlaceMeta[]> {
   if (businessIds.length === 0) return [];
-  const { data } = await supabase.from("businesses").select(PLACE_META_COLUMNS).in("id", businessIds);
-  return (data ?? []).map((row: any) => ({ ...row, id: String(row.id) }));
+  const unique = [...new Set(businessIds.map(String))];
+  const [{ data }, menuById] = await Promise.all([
+    supabase.from("businesses").select(PLACE_META_COLUMNS).in("id", unique),
+    fetchMenuPricesByBusinessIds(supabase, unique),
+  ]);
+  return (data ?? []).map((row: any) => ({
+    ...row,
+    id: String(row.id),
+    menuPrices: menuById.get(String(row.id)) ?? [],
+  }));
 }
 
 /** Last scheduling pass: caps, lodging, times, day split, and budget rebuilt from listed prices. */
@@ -1358,6 +1388,14 @@ function withServerOnlyDraftFields(schema: any): any {
   const draft = clone?.properties?.itineraryDraft;
   if (draft?.properties) {
     draft.properties.lodgingBusinessId = { type: ["string", "null"] };
+    const stopProps = draft.properties.days?.items?.properties?.stops?.items?.properties;
+    if (stopProps && typeof stopProps === "object") {
+      stopProps.costState = { type: "string", enum: ["listed", "estimated", "unknown"] };
+    }
+  }
+  const lineProps = clone?.properties?.budget?.properties?.lines?.items?.properties;
+  if (lineProps && typeof lineProps === "object") {
+    lineProps.costState = { type: "string", enum: ["listed", "estimated", "unknown"] };
   }
   return clone;
 }
