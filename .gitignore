@@ -22,3 +22,8 @@ logs/
 
 .vercel
 .superpowers/
+
+# Design-reference binaries (LFS blocked on public forks)
+docs/design-references/**/*.png
+docs/design-references/**/*.webp
+
