@@ -10,7 +10,6 @@ import {
   HelpCircle,
   ImagePlus,
   KeyRound,
-  Laptop,
   Link2,
   LogOut,
   Mail,
@@ -20,7 +19,6 @@ import {
   QrCode,
   Rocket,
   Shield,
-  Smartphone,
   Store,
   Tag,
   Trash2,
@@ -144,10 +142,7 @@ export function AccountHome() {
             icon={<User size={19} />}
             color="#FF6A00"
             label="Profile"
-            sub={t(
-              "Pangalan, email, mobile, password, device",
-              "Name, email, mobile, password, devices",
-            )}
+            sub={t("Pangalan, email, mobile, password", "Name, email, mobile, password")}
             to="/biz/account/profile"
           />
         </Group>
@@ -403,29 +398,6 @@ export function ProfilePage() {
 
     setPasswordSuccess(null)
   }
-
-  const devices = [
-    {
-      icon: <Laptop size={20} />,
-      name: "Chrome · Windows",
-      where: "Ermita, Maynila",
-      now: true,
-    },
-
-    {
-      icon: <Smartphone size={20} />,
-      name: "Bitinary Business · iPhone",
-      where: "Ermita, Maynila",
-    },
-
-    {
-      icon: <Smartphone size={20} />,
-      name: "Chrome · Android",
-      where: "Quezon City",
-    },
-  ]
-
-  const [devs, setDevs] = useState(devices)
 
   useEffect(() => {
     setP(d.profile)
@@ -908,36 +880,6 @@ export function ProfilePage() {
           onClick={() => setPw(true)}
         />
       </Group>
-      <Card
-        title={t("Mga aktibong device", "Active devices")}
-        icon={<Shield size={20} />}
-      >
-        <ul className="divide-y divide-line">
-          {devs.map((x) => (
-            <li key={x.name} className="flex min-h-14 items-center gap-3 py-2">
-              <span className="text-link">{x.icon}</span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[16px]">{x.name}</span>
-                <span className="text-[14px] text-fg-2">
-                  {x.where} ·{" "}
-                  {x.now
-                    ? t("Ito ang device na ito", "This device")
-                    : longDate(Date.now() - 2 * 864e5, lang)}
-                </span>
-              </span>
-              {!x.now && (
-                <Button
-                  size="sm"
-                  variant="danger"
-                  onClick={() => setDevs(devs.filter((y) => y !== x))}
-                >
-                  {t("I-sign out", "Sign out")}
-                </Button>
-              )}
-            </li>
-          ))}
-        </ul>
-      </Card>
       <Sheet
         open={pw}
         onClose={closePasswordSheet}

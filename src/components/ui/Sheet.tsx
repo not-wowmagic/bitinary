@@ -24,19 +24,26 @@ export function Sheet({
   const controls = useDragControls()
   const ref = useRef<HTMLDivElement>(null)
   const returnFocus = useRef<Element | null>(null)
+  const onCloseRef = useRef(onClose)
+
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
 
   useEffect(() => {
     if (!open) return
     returnFocus.current = document.activeElement
-    const t = setTimeout(() => ref.current?.focus(), 50)
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    const t = setTimeout(() => {
+      if (!ref.current?.contains(document.activeElement)) ref.current?.focus()
+    }, 50)
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCloseRef.current()
     window.addEventListener('keydown', onKey)
     return () => {
       clearTimeout(t)
       window.removeEventListener('keydown', onKey)
       ;(returnFocus.current as HTMLElement | null)?.focus?.()
     }
-  }, [open, onClose])
+  }, [open])
 
   const onDragEnd = (_: unknown, info: PanInfo) => {
     if (info.offset.y > 120 || info.velocity.y > 600) onClose()
