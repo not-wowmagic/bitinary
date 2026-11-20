@@ -2,7 +2,7 @@ import { ArrowUp, ChevronLeft, ChevronRight, Clock3, MapPin, MessageSquareText, 
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { useLang } from '@/app/i18n'
+import { useLang, useT } from '@/app/i18n'
 import { BudgetSheet } from '@/components/BudgetSheet'
 import { Jimbot } from '@/components/mascot/Jimbot'
 import { OfflineState } from '@/components/states/States'
@@ -371,115 +371,135 @@ export function detectIntent(raw: string): IntentResult {
 
 const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
 
-const MENU = ['Gumawa ng itinerary', 'Maghanap ng kainan', 'Maghanap ng pasyalan', 'Mag-budget']
+type LangT = (tl: string, en: string) => string
+/** Intent tests call handleMessage without a language, so Tagalog stays the default. */
+const tlOnly: LangT = (tl) => tl
 
-export function buildReply(result: IntentResult, ctx: ChatContext): ReplyData {
+const menu = (t: LangT) => [
+  t('Gumawa ng itinerary', 'Make an itinerary'),
+  t('Maghanap ng kainan', 'Find restaurants'),
+  t('Maghanap ng pasyalan', 'Find attractions'),
+  t('Mag-budget', 'Set a budget'),
+]
+
+const categoryLabel = (category: NonNullable<Entities['category']>, t: LangT) => {
+  if (category === 'kainan') return t('kainan', 'dining places')
+  if (category === 'cafe') return t('cafe', 'cafes')
+  if (category === 'resort') return t('resort', 'resorts')
+  if (category === 'pasyalan') return t('pasyalan', 'attractions')
+  return t('negosyo', 'businesses')
+}
+
+export function buildReply(result: IntentResult, ctx: ChatContext, t: LangT = tlOnly): ReplyData {
   const { intent, entities } = result
 
   switch (intent) {
     case 'greeting':
       return {
         text: pick([
-          'Kumusta! Ako si Jimbot, ang AI travel buddy mo. Ano ang maitutulong ko sa biyahe mo?',
-          'Hello! Handa na akong tumulong sa plano mo. Itinerary, kainan, o pasyalan?',
+          t('Kumusta! Ako si Jimbot, ang AI travel buddy mo. Ano ang maitutulong ko sa biyahe mo?', "Hi! I'm Jimbot, your AI travel buddy. How can I help with your trip?"),
+          t('Hello! Handa na akong tumulong sa plano mo. Itinerary, kainan, o pasyalan?', "Hello! I'm ready to help with your plan. Itinerary, dining, or places to visit?"),
         ]),
-        quickReplies: MENU,
+        quickReplies: menu(t),
       }
 
     case 'smalltalk':
-      return { text: pick(['Mabuti naman! Saan mo gustong gumala?', 'Ayos! May plano ka na bang puntahan?', 'Nandito lang ako kung kailangan mo ng travel tips o rekomendasyon.']), quickReplies: MENU }
+      return { text: pick([t('Mabuti naman! Saan mo gustong gumala?', "I'm doing well! Where would you like to go?"), t('Ayos! May plano ka na bang puntahan?', 'Great! Do you have a place in mind?'), t('Nandito lang ako kung kailangan mo ng travel tips o rekomendasyon.', "I'm here if you need travel tips or recommendations.")]), quickReplies: menu(t) }
 
     case 'thanks':
-      return { text: 'Walang anuman! Sabihin mo lang kung may iba ka pang kailangan.' }
+      return { text: t('Walang anuman! Sabihin mo lang kung may iba ka pang kailangan.', "You're welcome! Just let me know if you need anything else.") }
 
     case 'goodbye':
-      return { text: 'Paalam! Ingat sa biyahe, at balik ka lang kay Jimbot kapag may bagong plano. 🐯' }
+      return { text: t('Paalam! Ingat sa biyahe, at balik ka lang kay Jimbot kapag may bagong plano. 🐯', 'Goodbye! Have a safe trip, and come back to Jimbot when you have a new plan. 🐯') }
 
     case 'help':
       return {
-        text: 'Matutulungan kitang maghanap ng verified na lugar, tumingin ng naka-save na itinerary, magplano ayon sa araw at budget, at magbigay ng pangkalahatang tips sa biyahe.',
-        quickReplies: [...MENU, 'Tips sa commute', 'Tips sa pag-iimpake'],
+        text: t('Matutulungan kitang maghanap ng verified na lugar, tumingin ng naka-save na itinerary, magplano ayon sa araw at budget, at magbigay ng pangkalahatang tips sa biyahe.', 'I can help you find verified places, check a saved itinerary, plan by days and budget, and give general travel tips.'),
+        quickReplies: [...menu(t), t('Tips sa commute', 'Commute tips'), t('Tips sa pag-iimpake', 'Packing tips')],
       }
 
     case 'itinerary': {
       if (!entities.days) {
         return {
-          text: 'Ilang araw ang biyahe mo?',
-          quickReplies: ['1 araw', '2 araw', '3 araw', 'Weekend'],
+          text: t('Ilang araw ang biyahe mo?', 'How many days is your trip?'),
+          quickReplies: [t('1 araw', '1 day'), t('2 araw', '2 days'), t('3 araw', '3 days'), 'Weekend'],
         }
       }
-      if (!entities.location) return { text: `Saan mo gustong pumunta para sa ${entities.days}-araw na biyahe?`, quickReplies: ['Baguio', 'Cebu', 'Intramuros'] }
-      return { text: `Titingnan ko ang mga naka-save na itinerary sa ${entities.location}. Ang database ay walang haba ng biyahe o bilang ng kasama, kaya hindi ko makukumpirmang tugma ang mga iyon.`, action: 'ASK_ITINERARY_DETAILS' }
+      if (!entities.location) return { text: t(`Saan mo gustong pumunta para sa ${entities.days}-araw na biyahe?`, `Where would you like to go for the ${entities.days}-day trip?`), quickReplies: ['Baguio', 'Cebu', 'Intramuros'] }
+      return { text: t(`Titingnan ko ang mga naka-save na itinerary sa ${entities.location}. Ang database ay walang haba ng biyahe o bilang ng kasama, kaya hindi ko makukumpirmang tugma ang mga iyon.`, `I'll check the saved itineraries in ${entities.location}. The database does not record trip length or group size, so I can't confirm those match.`), action: 'ASK_ITINERARY_DETAILS' }
     }
 
     case 'database_search':
       if (!entities.category && result.confidence <= 0.7) {
         return {
-          text: `Hahanapin ko ang mga verified na lugar na may kaugnayan sa “${result.normalized}”.`,
+          text: t(`Hahanapin ko ang mga verified na lugar na may kaugnayan sa “${result.normalized}”.`, `I'll look for verified places related to “${result.normalized}”.`),
           action: 'SEARCH_DB',
         }
       }
-      if (!entities.category) return { text: 'Anong uri ng lugar ang hanap mo?', quickReplies: ['Kainan', 'Cafe', 'Resort', 'Pasyalan'] }
+      if (!entities.category) return { text: t('Anong uri ng lugar ang hanap mo?', 'What kind of place are you looking for?'), quickReplies: [t('Kainan', 'Restaurant'), 'Cafe', 'Resort', t('Pasyalan', 'Attraction')] }
       return {
-        text: `Hahanapin ko ang mga verified na ${entities.category}${entities.location ? ` sa ${entities.location}` : ' sa database'}.`,
+        text: t(`Hahanapin ko ang mga verified na ${entities.category}${entities.location ? ` sa ${entities.location}` : ' sa database'}.`, `I'll look for verified ${categoryLabel(entities.category, t)}${entities.location ? ` in ${entities.location}` : ' in the database'}.`),
         action: 'SEARCH_DB',
       }
 
     case 'budget':
       return {
         text: entities.budget
-          ? pick([`Noted, ₱${entities.budget.toLocaleString()} ang budget mo. Buksan natin ang planner para makita ang mga gastos.`, `₱${entities.budget.toLocaleString()} ang ilalaan mo. Nasa Budget planner ang breakdown ng biyahe mo.`])
-          : 'Magkano ang budget mo? Buksan natin ang planner para maitala ang mga gastos.',
+          ? pick([
+              t(`Noted, ₱${entities.budget.toLocaleString()} ang budget mo. Buksan natin ang planner para makita ang mga gastos.`, `Noted, your budget is ₱${entities.budget.toLocaleString()}. Let's open the planner to see the costs.`),
+              t(`₱${entities.budget.toLocaleString()} ang ilalaan mo. Nasa Budget planner ang breakdown ng biyahe mo.`, `You've set aside ₱${entities.budget.toLocaleString()}. Your trip breakdown is in the Budget planner.`),
+            ])
+          : t('Magkano ang budget mo? Buksan natin ang planner para maitala ang mga gastos.', "How much is your budget? Let's open the planner to record the costs."),
         action: 'OPEN_BUDGET',
       }
 
     case 'transport':
-      return { text: 'Wala akong live na ruta o pamasahe. I-check ang opisyal na transit app o operator bago bumiyahe, at maglaan ng dagdag na oras para sa transfers at traffic.' }
+      return { text: t('Wala akong live na ruta o pamasahe. I-check ang opisyal na transit app o operator bago bumiyahe, at maglaan ng dagdag na oras para sa transfers at traffic.', "I don't have live routes or fares. Check the official transit app or operator before travelling, and allow extra time for transfers and traffic.") }
 
     case 'packing':
-      return { text: pick(['Ihanda ang valid ID, charger, gamot na kailangan mo, at damit ayon sa panahon. I-check ang baggage rules ng sasakyan mo bago bumiyahe.', 'Magdala ng tubig, power bank, kopya ng booking, at komportableng sapatos. Iakma ang damit sa haba at aktibidad ng biyahe.']) }
+      return { text: pick([t('Ihanda ang valid ID, charger, gamot na kailangan mo, at damit ayon sa panahon. I-check ang baggage rules ng sasakyan mo bago bumiyahe.', 'Prepare a valid ID, charger, any medicine you need, and clothes for the weather. Check your carrier’s baggage rules before travelling.'), t('Magdala ng tubig, power bank, kopya ng booking, at komportableng sapatos. Iakma ang damit sa haba at aktibidad ng biyahe.', 'Bring water, a power bank, a copy of your booking, and comfortable shoes. Match your clothes to the trip length and activities.')]) }
 
     case 'safety':
-      return { text: 'Pangkalahatang paalala: itago nang maayos ang mahahalagang gamit, ipaalam sa kasama ang plano, at gamitin ang opisyal na emergency channels. Wala akong live safety reports para sa mga lugar.' }
+      return { text: t('Pangkalahatang paalala: itago nang maayos ang mahahalagang gamit, ipaalam sa kasama ang plano, at gamitin ang opisyal na emergency channels. Wala akong live safety reports para sa mga lugar.', 'General reminder: keep your valuables secure, tell your companions your plan, and use official emergency channels. I do not have live safety reports for places.') }
 
     case 'weather':
-      return { text: 'Wala akong live na weather forecast. Tingnan ang opisyal na forecast bago umalis; kung ibibigay mo ang lugar, makakatulong akong maghanap ng mga verified na puntahan doon.' }
+      return { text: t('Wala akong live na weather forecast. Tingnan ang opisyal na forecast bago umalis; kung ibibigay mo ang lugar, makakatulong akong maghanap ng mga verified na puntahan doon.', "I don't have a live weather forecast. Check the official forecast before leaving; if you tell me the place, I can help find verified spots there.") }
 
     case 'fallback_gibberish':
     case 'fallback_unclear':
-      return buildFallback(intent, ctx)
+      return buildFallback(intent, ctx, t)
   }
 }
 
 /** Escalating fallback so the bot never repeats the exact same line forever. */
-function buildFallback(intent: 'fallback_gibberish' | 'fallback_unclear', ctx: ChatContext): ReplyData {
+function buildFallback(intent: 'fallback_gibberish' | 'fallback_unclear', ctx: ChatContext, t: LangT = tlOnly): ReplyData {
   const level = ctx.fallbackCount // 0 = first miss
 
   if (level === 0) {
     return {
       text:
         intent === 'fallback_gibberish'
-          ? 'Hmm, hindi ko maintindihan ang mensahe mo. 😅 Pwede mo bang ulitin o piliin ang isa sa baba?'
-          : 'Pasensya na, hindi ko pa nakuha ang ibig mong sabihin. Ano ang gusto mong malaman?',
-      quickReplies: MENU,
+          ? t('Hmm, hindi ko maintindihan ang mensahe mo. 😅 Pwede mo bang ulitin o piliin ang isa sa baba?', "Hmm, I couldn't understand your message. 😅 Could you repeat it or pick one below?")
+          : t('Pasensya na, hindi ko pa nakuha ang ibig mong sabihin. Ano ang gusto mong malaman?', "Sorry, I didn't quite get what you meant. What would you like to know?"),
+      quickReplies: menu(t),
     }
   }
   if (level === 1) {
     return {
-      text: 'Pasensya na ulit! Subukan mo ang ganito: "Gumawa ng 3 araw na itinerary sa Baguio" o "Kainan malapit sa Session Road".',
-      quickReplies: MENU,
+      text: t('Pasensya na ulit! Subukan mo ang ganito: "Gumawa ng 3 araw na itinerary sa Baguio" o "Kainan malapit sa Session Road".', 'Sorry again! Try something like "Make a 3-day itinerary in Baguio" or "Restaurants near Session Road".'),
+      quickReplies: menu(t),
     }
   }
   return {
-    text: 'Mukhang nahihirapan akong intindihin ka. Gusto mo bang makausap ang support team namin, o subukan ulit sa mga pagpipilian sa baba?',
-    quickReplies: [...MENU.slice(0, 2), 'Kausapin ang support'],
+    text: t('Mukhang nahihirapan akong intindihin ka. Gusto mo bang makausap ang support team namin, o subukan ulit sa mga pagpipilian sa baba?', 'It looks like I am having trouble understanding you. Would you like to talk to our support team, or try again with the options below?'),
+    quickReplies: [...menu(t).slice(0, 2), t('Kausapin ang support', 'Talk to support')],
     action: 'HANDOFF',
   }
 }
 
 /* ============================ MAIN ENTRY =========================== */
 
-export function handleMessage(raw: string, ctx: ChatContext): { reply: ReplyData; ctx: ChatContext; result: IntentResult } {
+export function handleMessage(raw: string, ctx: ChatContext, t: LangT = tlOnly): { reply: ReplyData; ctx: ChatContext; result: IntentResult } {
   let result = detectIntent(raw)
   if (
     KNOWN_LOCATIONS.includes(result.normalized) &&
@@ -512,7 +532,7 @@ export function handleMessage(raw: string, ctx: ChatContext): { reply: ReplyData
   if (/\b(mas mura|mas tipid|mas barato|barato|tipid|cheap|cheaper|cheapest|lower price)\b/.test(result.normalized)) slots.vibe = 'tipid'
   if (/\b(mas mahal)\b/.test(result.normalized)) slots.vibe = undefined
   const enrichedResult = { ...result, entities: slots }
-  const reply = buildReply(enrichedResult, { ...ctx, slots })
+  const reply = buildReply(enrichedResult, { ...ctx, slots }, t)
   const lastIntent =
     result.intent === 'itinerary' || result.intent === 'database_search' || result.intent === 'budget'
       ? result.intent
@@ -530,13 +550,13 @@ type Conversation = { id: string; updated_at: string; title: string }
 
 const MAX_INPUT = 300
 
-const welcomeMessage: Msg = {
+const welcomeMessage = (t: LangT = tlOnly): Msg => ({
   id: 'welcome',
   role: 'bot',
   expression: 'waving',
-  text: 'Kumusta! Ako si Jimbot. Maghanap tayo ng lugar, magplano ng biyahe, o tingnan ang budget mo.',
-  quickReplies: MENU,
-}
+  text: t('Kumusta! Ako si Jimbot. Maghanap tayo ng lugar, magplano ng biyahe, o tingnan ang budget mo.', "Hi! I'm Jimbot. Let's find a place, plan a trip, or check your budget."),
+  quickReplies: menu(t),
+})
 
 // Words that carry no search meaning, so they don't cause false matches in the businesses table.
 const SEARCH_STOPWORDS = new Set(
@@ -695,7 +715,7 @@ export function JimbotScreen() {
 
 export function JimbotChat({ embedded }: { embedded?: boolean }) {
   const { t } = useLang()
-  const [messages, setMessages] = useState<Msg[]>([welcomeMessage])
+  const [messages, setMessages] = useState<Msg[]>(() => [welcomeMessage(t)])
   const [thinking, setThinking] = useState(false)
   const [input, setInput] = useState('')
   const [budgetOpen, setBudgetOpen] = useState(false)
@@ -766,7 +786,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
       }
       const conversationList = conversations.map((conversation) => ({
         ...conversation,
-        title: firstMessage.get(conversation.id)?.slice(0, 52) || 'Bagong usapan',
+        title: firstMessage.get(conversation.id)?.slice(0, 52) || t('Bagong usapan', 'New chat'),
       }))
       setHistory(conversationList)
       setHistoryLoading(false)
@@ -796,13 +816,13 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
       return
     }
     if (!isActive()) return
-    const restored: Msg[] = [welcomeMessage]
+    const restored: Msg[] = [welcomeMessage(t)]
     chatCtx.current = { fallbackCount: 0, slots: {} }
     for (const message of data ?? []) {
       if (message.intent?.startsWith('feedback_')) continue
       if (message.role === 'user') {
         restored.push({ id: message.id, role: 'user', text: message.content })
-        chatCtx.current = handleMessage(message.content, chatCtx.current).ctx
+        chatCtx.current = handleMessage(message.content, chatCtx.current, t).ctx
       } else {
         restored.push({ id: message.id, role: 'bot', expression: 'idea', text: message.content })
       }
@@ -825,7 +845,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
       createdConversation = true
     }
     const id = conversationId.current
-    if (!id) throw new Error('Hindi nagawa ang pag-uusap ni Jimbot.')
+    if (!id) throw new Error(t('Hindi nagawa ang pag-uusap ni Jimbot.', "Couldn't create the Jimbot conversation."))
     const { error } = await supabase.from('jimbot_messages').insert({
       conversation_id: id,
       user_id: auth.user.id,
@@ -842,7 +862,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
       const next = {
         id,
         updated_at: updatedAt,
-        title: createdConversation && role === 'user' ? content.slice(0, 52) : existing?.title ?? 'Bagong usapan',
+        title: createdConversation && role === 'user' ? content.slice(0, 52) : existing?.title ?? t('Bagong usapan', 'New chat'),
       }
       return [next, ...current.filter((conversation) => conversation.id !== id)].slice(0, 30)
     })
@@ -854,7 +874,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
     if (!clean || thinking) return
 
     // 1. Classify (handles typos, gibberish, entities) and update the fallback counter.
-    const { reply, ctx, result } = handleMessage(clean, chatCtx.current)
+    const { reply, ctx, result } = handleMessage(clean, chatCtx.current, t)
     chatCtx.current = ctx
     const intent = result.intent
     const isFallback = intent === 'fallback_gibberish' || intent === 'fallback_unclear'
@@ -876,7 +896,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
       if ((intent !== 'itinerary' && intent !== 'database_search') || !reply.action) {
         if (reply.action === 'OPEN_BUDGET') setBudgetOpen(true)
         // TODO: handle reply.action === 'HANDOFF' (open your support screen) and drop this filter.
-        const quick = reply.quickReplies?.filter((q) => q !== 'Kausapin ang support')
+        const quick = reply.quickReplies?.filter((q) => q !== t('Kausapin ang support', 'Talk to support'))
         await pushBot(reply.text, intent === 'greeting' ? 'waving' : isFallback ? 'unsure' : 'idea', quick)
         return
       }
@@ -885,8 +905,8 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
       if (intent === 'itinerary') {
         const itineraries = await findItineraries(result.entities)
         const replyText = itineraries.length
-          ? `May ${itineraries.length} naka-save na itinerary sa ${result.entities.location}. Hindi naka-record ang haba ng biyahe o bilang ng kasama, kaya hindi ko makukumpirmang tugma ang mga iyon.`
-          : `Wala akong nakitang naka-save na itinerary sa ${result.entities.location}${result.entities.budget ? ` na pasok sa ₱${result.entities.budget.toLocaleString()} budget` : ''}. Maaari kang mag-browse ng verified na lugar para buuin ang biyahe.`
+          ? t(`May ${itineraries.length} naka-save na itinerary sa ${result.entities.location}. Hindi naka-record ang haba ng biyahe o bilang ng kasama, kaya hindi ko makukumpirmang tugma ang mga iyon.`, `There are ${itineraries.length} saved itineraries in ${result.entities.location}. Trip length and group size are not recorded, so I can't confirm those match.`)
+          : t(`Wala akong nakitang naka-save na itinerary sa ${result.entities.location}${result.entities.budget ? ` na pasok sa ₱${result.entities.budget.toLocaleString()} budget` : ''}. Maaari kang mag-browse ng verified na lugar para buuin ang biyahe.`, `I couldn't find a saved itinerary in ${result.entities.location}${result.entities.budget ? ` within your ₱${result.entities.budget.toLocaleString()} budget` : ''}. You can browse verified places to build a trip.`)
         await pushBot(replyText, itineraries.length ? 'idea' : 'unsure', undefined, itineraries)
         return
       }
@@ -915,28 +935,36 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
       }
 
       const locationLabel = result.entities.location ? ` sa ${result.entities.location}` : ''
+      const locationLabelEn = result.entities.location ? ` in ${result.entities.location}` : ''
+      const vibe = result.entities.vibe
+        ? result.entities.vibe === 'tipid'
+          ? t('tipid', 'budget')
+          : result.entities.vibe === 'pamilya'
+            ? t('pamilya', 'family')
+            : 'romantic'
+        : ''
       const intro = matches.length
         ? broadenedLocation
-          ? `Wala akong nahanap sa ${result.entities.location}, kaya pinalawak ko ang paghahanap sa iba pang verified na lugar.`
+          ? t(`Wala akong nahanap sa ${result.entities.location}, kaya pinalawak ko ang paghahanap sa iba pang verified na lugar.`, `I couldn't find anything in ${result.entities.location}, so I widened the search to other verified places.`)
           : broadenedVibe
-            ? `Wala akong nahanap na lugar na may ${result.entities.vibe} tag${locationLabel}; narito ang iba pang verified na tugma.`
-          : broadenedPrice
-            ? `Walang pasok sa price tier na ₱. Pinalawak ko ang presyo para makakita ka ng iba pang verified na lugar${locationLabel}.`
-            : result.entities.category
-              ? `Narito ang mga verified na ${result.entities.category}${locationLabel}.`
-              : `Narito ang mga verified na negosyong may kaugnayan sa “${clean}”.`
+            ? t(`Wala akong nahanap na lugar na may ${vibe} tag${locationLabel}; narito ang iba pang verified na tugma.`, `I couldn't find a place with a ${vibe} vibe${locationLabelEn}; here are other verified matches.`)
+            : broadenedPrice
+              ? t(`Walang pasok sa price tier na ₱. Pinalawak ko ang presyo para makakita ka ng iba pang verified na lugar${locationLabel}.`, `Nothing matched the ₱ price tier. I widened the price range so you can see other verified places${locationLabelEn}.`)
+              : result.entities.category
+                ? t(`Narito ang mga verified na ${result.entities.category}${locationLabel}.`, `Here are verified ${categoryLabel(result.entities.category, t)}${locationLabelEn}.`)
+                : t(`Narito ang mga verified na negosyong may kaugnayan sa “${clean}”.`, `Here are verified businesses related to “${clean}”.`)
         : result.entities.category
-          ? `Wala akong nahanap na verified na ${result.entities.category}${locationLabel}. Subukan ang ibang lugar o kategorya.`
-          : `Wala akong nahanap na verified na negosyong tugma sa “${clean}”. Subukan ang ibang salita o lugar.`
+          ? t(`Wala akong nahanap na verified na ${result.entities.category}${locationLabel}. Subukan ang ibang lugar o kategorya.`, `I couldn't find verified ${categoryLabel(result.entities.category, t)}${locationLabelEn}. Try another place or category.`)
+          : t(`Wala akong nahanap na verified na negosyong tugma sa “${clean}”. Subukan ang ibang salita o lugar.`, `I couldn't find a verified business matching “${clean}”. Try different words or a different place.`)
       const groundedIntro = result.entities.budget && intent === 'database_search'
-        ? `${intro} May price tier lang ang business records, hindi eksaktong presyo bawat tao; hindi ko masisiguro kung pasok sa ₱${result.entities.budget.toLocaleString()}.`
+        ? t(`${intro} May price tier lang ang business records, hindi eksaktong presyo bawat tao; hindi ko masisiguro kung pasok sa ₱${result.entities.budget.toLocaleString()}.`, `${intro} Business records only have a price tier, not exact per-person prices, so I can't be sure it fits ₱${result.entities.budget.toLocaleString()}.`)
         : result.entities.people && intent === 'database_search'
-            ? `${intro} Naitala ko ang ${result.entities.people} na kasama, pero wala sa business records ang presyo bawat tao.`
-            : intro
-      await pushBot(groundedIntro, matches.length ? 'idea' : 'unsure', matches.length ? ['Sa Baguio naman', 'Sa Cebu naman', 'Sa Intramuros naman'] : ['Baguio', 'Cebu', 'Intramuros'], matches)
+          ? t(`${intro} Naitala ko ang ${result.entities.people} na kasama, pero wala sa business records ang presyo bawat tao.`, `${intro} I noted your group of ${result.entities.people}, but business records do not include per-person prices.`)
+          : intro
+      await pushBot(groundedIntro, matches.length ? 'idea' : 'unsure', matches.length ? [t('Sa Baguio naman', 'Baguio instead'), t('Sa Cebu naman', 'Cebu instead'), t('Sa Intramuros naman', 'Intramuros instead')] : ['Baguio', 'Cebu', 'Intramuros'], matches)
     } catch (error) {
       console.error('Jimbot database request failed', error)
-      const replyText = 'Hindi ko ma-access ang database ngayon. Subukan ulit mamaya.'
+      const replyText = t('Hindi ko ma-access ang database ngayon. Subukan ulit mamaya.', "I can't access the database right now. Try again later.")
       setMessages((m) => [...m, { id: `b${Date.now()}`, role: 'bot', expression: 'unsure', text: replyText }])
       try {
         await saveMessage('bot', replyText, intent)
@@ -951,14 +979,14 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
   const sendFeedback = async (messageId: string, value: 'up' | 'down') => {
     try {
       const saved = await saveMessage('user', `Jimbot response ${messageId}: ${value === 'up' ? 'helpful' : 'not helpful'}`, `feedback_${value}`)
-      if (!saved) throw new Error('Mag-sign in para maitala ang feedback.')
+      if (!saved) throw new Error(t('Mag-sign in para maitala ang feedback.', 'Sign in to save feedback.'))
       setMessages((current) => current.map((message) => (message.id === messageId && message.role === 'bot' ? { ...message, feedback: value, feedbackError: undefined } : message)))
     } catch (error) {
       console.error('Jimbot feedback save failed', error)
       setMessages((current) =>
         current.map((message) =>
           message.id === messageId && message.role === 'bot'
-            ? { ...message, feedbackError: error instanceof Error ? error.message : 'Hindi na-save ang feedback. Subukan ulit.' }
+            ? { ...message, feedbackError: error instanceof Error ? error.message : t('Hindi na-save ang feedback. Subukan ulit.', "Feedback wasn't saved. Try again.") }
             : message,
         ),
       )
@@ -969,7 +997,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
     if (thinking || switchingConversation) return
     conversationId.current = undefined
     chatCtx.current = { fallbackCount: 0, slots: {} }
-    setMessages([welcomeMessage])
+    setMessages([welcomeMessage(t)])
     setInput('')
     setConversationError(false)
     setHistoryOpen(false)
@@ -983,7 +1011,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
         <div className={cn('mx-auto flex items-center gap-2 px-4 pb-3 pt-[max(12px,env(safe-area-inset-top))]', !embedded && 'max-w-[760px] md:px-6 md:pt-6')}>
           <button
             type="button"
-            aria-label={historyOpen ? 'Isara ang mga usapan' : 'Buksan ang mga usapan'}
+            aria-label={historyOpen ? t('Isara ang mga usapan', 'Close conversations') : t('Buksan ang mga usapan', 'Open conversations')}
             aria-expanded={historyOpen}
             onClick={() => setHistoryOpen((open) => !open)}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-fg-2 transition-colors hover:bg-sunken"
@@ -995,10 +1023,10 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
             <h1 className="flex items-center gap-2 text-h2">
               Jimbot <PhaseTag phase="MVP" />
             </h1>
-            <p className="text-caption text-fg-2">{thinking ? 'Nag-iisip…' : online ? 'AI travel buddy mo · Tagalog / Bisaya / English' : 'Offline'}</p>
+            <p className="text-caption text-fg-2">{thinking ? t('Nag-iisip…', 'Thinking…') : online ? t('AI travel buddy mo · Tagalog / Bisaya / English', 'Your AI travel buddy · Tagalog / Bisaya / English') : t('Offline', 'Offline')}</p>
           </div>
           <Button size="sm" variant="secondary" icon={<Plus size={16} />} onClick={startNewConversation} disabled={thinking || switchingConversation || historyLoading}>
-            Bago
+            {t('Bago', 'New')}
           </Button>
           <Button size="sm" variant="secondary" icon={<PiggyBank size={16} />} onClick={() => setBudgetOpen(true)}>
             Budget
@@ -1011,9 +1039,9 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
           <aside className={cn('absolute inset-y-0 left-0 z-30 flex w-[min(280px,85vw)] flex-col border-r border-line bg-bg shadow-float md:w-[260px]', !embedded && 'md:static md:shadow-none')}>
             <div className="flex items-center justify-between border-b border-line px-4 py-3">
               <h2 className="flex items-center gap-2 font-display text-[15px] font-semibold">
-                <Clock3 size={17} className="text-link" /> Mga usapan
+                <Clock3 size={17} className="text-link" /> {t('Mga usapan', 'Conversations')}
               </h2>
-              <button type="button" aria-label="Isara ang mga usapan" onClick={() => setHistoryOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-full text-fg-2 hover:bg-sunken">
+              <button type="button" aria-label={t('Isara ang mga usapan', 'Close conversations')} onClick={() => setHistoryOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-full text-fg-2 hover:bg-sunken">
                 <ChevronLeft size={19} />
               </button>
             </div>
@@ -1028,7 +1056,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
                   ))}
                 </div>
               ) : historyError ? (
-                <p role="alert" className="px-3 py-4 text-sm text-danger">Hindi ma-load ang kasaysayan ng usapan.</p>
+                <p role="alert" className="px-3 py-4 text-sm text-danger">{t('Hindi ma-load ang kasaysayan ng usapan.', "Couldn't load the conversation history.")}</p>
               ) : history.length ? (
                 <ul className="space-y-1">
                   {history.map((conversation) => (
@@ -1050,22 +1078,22 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
                   ))}
                 </ul>
               ) : (
-                <p className="px-3 py-4 text-sm text-fg-2">Wala pang naka-save na usapan.</p>
+                <p className="px-3 py-4 text-sm text-fg-2">{t('Wala pang naka-save na usapan.', 'No saved conversations yet.')}</p>
               )}
             </div>
           </aside>
         )}
         <section className="flex min-w-0 flex-1 flex-col">
           {!online ? (
-            <OfflineState body="Kailangan ni Jimbot ng internet para gumawa ng bagong plano. Bukas pa rin ang mga naka-save mong itinerary." />
+            <OfflineState body={t('Kailangan ni Jimbot ng internet para gumawa ng bagong plano. Bukas pa rin ang mga naka-save mong itinerary.', 'Jimbot needs internet to make a new plan. Your saved itineraries are still available.')} />
           ) : (
             <div ref={listRef} className={cn('mx-auto w-full flex-1 space-y-4 px-4 pb-4 pt-4', !embedded && 'max-w-[760px] md:px-6')} aria-live="polite">
               {switchingConversation ? (
-                <p className="text-center text-caption text-fg-2">Binubuksan ang usapan…</p>
+                <p className="text-center text-caption text-fg-2">{t('Binubuksan ang usapan…', 'Opening conversation…')}</p>
               ) : (
                 <>
-                  {conversationError && <p role="alert" className="text-center text-sm text-danger">Hindi ma-load ang usapan. Subukan itong buksan ulit.</p>}
-                  <p className="text-center text-caption text-fg-2">Ngayon · Tagalog, Bisaya, at English</p>
+                  {conversationError && <p role="alert" className="text-center text-sm text-danger">{t('Hindi ma-load ang usapan. Subukan itong buksan ulit.', "Couldn't load the conversation. Try opening it again.")}</p>}
+                  <p className="text-center text-caption text-fg-2">{t('Ngayon · Tagalog, Bisaya, at English', 'Today · Tagalog, Bisaya, and English')}</p>
                   {messages.map((m) =>
                     m.role === 'user' ? (
                       <UserBubble key={m.id} text={m.text} />
@@ -1096,18 +1124,18 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
                 className="flex items-center gap-2 px-4 pb-3"
               >
                 <label className="glass flex h-12 flex-1 items-center rounded-full pl-4 pr-1.5 shadow-float">
-                  <span className="sr-only">Mensahe kay Jimbot</span>
+                  <span className="sr-only">{t('Mensahe kay Jimbot', 'Message Jimbot')}</span>
                   <input
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     maxLength={MAX_INPUT}
-                    placeholder="Itanong kay Jimbot…"
+                    placeholder={t('Itanong kay Jimbot…', 'Ask Jimbot…')}
                     disabled={!online || switchingConversation}
                     className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-fg outline-none placeholder:text-fg-2"
                   />
                   <button
                     type="submit"
-                    aria-label="Ipadala"
+                    aria-label={t('Ipadala', 'Send')}
                     disabled={!input.trim() || thinking || switchingConversation}
                     className="flex h-10 w-10 items-center justify-center rounded-full bg-deep text-white transition-opacity disabled:opacity-40"
                   >
@@ -1133,11 +1161,12 @@ function UserBubble({ text }: { text: string }) {
 }
 
 function Thinking() {
+  const t = useT()
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex items-end gap-2">
       <Jimbot expression="thinking" variant="standalone" size={84} />
       <div className="card mb-3 flex items-center gap-1.5 rounded-[22px] rounded-bl-md px-4 py-3">
-        <span className="text-[15px] text-fg-2">Gumagawa ng plano</span>
+        <span className="text-[15px] text-fg-2">{t('Gumagawa ng plano', 'Making a plan')}</span>
         {[0, 1, 2].map((i) => (
           <motion.span key={i} className="h-1.5 w-1.5 rounded-full bg-primary" animate={{ opacity: [0.2, 1, 0.2] }} transition={{ duration: 1, repeat: Infinity, delay: i * 0.18 }} />
         ))}
@@ -1160,6 +1189,7 @@ function BotReply({
   onOpenResult: (result: ChatResult) => void
 }) {
   const big = msg.expression === 'unsure'
+  const t = useT()
   const resultsTrackRef = useRef<HTMLDivElement>(null)
   const hasCarousel = (msg.results?.length ?? 0) > 3
   const scrollResults = (direction: -1 | 1) => {
@@ -1175,7 +1205,7 @@ function BotReply({
       )}
       <div className="min-w-0 flex-1 space-y-2">
         <div className={cn('card rounded-[22px] rounded-tl-md px-4 py-3', big && 'border-2 border-dashed border-caution/50')}>
-          {big && <p className="mb-1 font-display text-[15px] font-semibold text-caution">Hindi ako sigurado</p>}
+          {big && <p className="mb-1 font-display text-[15px] font-semibold text-caution">{t('Hindi ako sigurado', "I'm not sure")}</p>}
           <p className="text-[16px] leading-6">{msg.text}</p>
         </div>
         {msg.results && msg.results.length > 0 && (
@@ -1183,12 +1213,12 @@ function BotReply({
             {hasCarousel && (
               <div className="flex items-center justify-between px-1">
                 <p className="text-xs font-semibold text-fg-2">
-                  {msg.results.length} resulta · swipe para makita lahat
+                  {msg.results.length} {t('resulta · swipe para makita lahat', 'results · swipe to see all')}
                 </p>
                 <div className="flex gap-1">
                   <button
                     type="button"
-                    aria-label="Mga naunang resulta"
+                    aria-label={t('Mga naunang resulta', 'Previous results')}
                     onClick={() => scrollResults(-1)}
                     className="flex h-8 w-8 items-center justify-center rounded-full border border-line text-fg-2 transition hover:bg-surface"
                   >
@@ -1196,7 +1226,7 @@ function BotReply({
                   </button>
                   <button
                     type="button"
-                    aria-label="Mga susunod na resulta"
+                    aria-label={t('Mga susunod na resulta', 'Next results')}
                     onClick={() => scrollResults(1)}
                     className="flex h-8 w-8 items-center justify-center rounded-full border border-line text-fg-2 transition hover:bg-surface"
                   >
@@ -1208,7 +1238,7 @@ function BotReply({
             <div
               ref={hasCarousel ? resultsTrackRef : undefined}
               role={hasCarousel ? 'region' : undefined}
-              aria-label={hasCarousel ? 'Mga resulta sa carousel' : undefined}
+              aria-label={hasCarousel ? t('Mga resulta sa carousel', 'Results carousel') : undefined}
               tabIndex={hasCarousel ? 0 : undefined}
               className={hasCarousel ? 'no-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2' : 'space-y-2'}
             >
@@ -1239,11 +1269,11 @@ function BotReply({
         )}
         {msg.id !== 'welcome' && (
           <div className="flex items-center gap-2 pt-1">
-            <span className="text-[12px] text-fg-2">Nakatulong ba ito?</span>
-            <button type="button" aria-label="Nakatulong" aria-pressed={msg.feedback === 'up'} onClick={() => onFeedback('up')} className={cn('rounded-full p-1.5 text-fg-2 hover:bg-surface', msg.feedback === 'up' && 'bg-primary/15 text-primary')}>
+            <span className="text-[12px] text-fg-2">{t('Nakatulong ba ito?', 'Did this help?')}</span>
+            <button type="button" aria-label={t('Nakatulong', 'Helpful')} aria-pressed={msg.feedback === 'up'} onClick={() => onFeedback('up')} className={cn('rounded-full p-1.5 text-fg-2 hover:bg-surface', msg.feedback === 'up' && 'bg-primary/15 text-primary')}>
               <ThumbsUp size={15} />
             </button>
-            <button type="button" aria-label="Hindi nakatulong" aria-pressed={msg.feedback === 'down'} onClick={() => onFeedback('down')} className={cn('rounded-full p-1.5 text-fg-2 hover:bg-surface', msg.feedback === 'down' && 'bg-primary/15 text-primary')}>
+            <button type="button" aria-label={t('Hindi nakatulong', 'Not helpful')} aria-pressed={msg.feedback === 'down'} onClick={() => onFeedback('down')} className={cn('rounded-full p-1.5 text-fg-2 hover:bg-surface', msg.feedback === 'down' && 'bg-primary/15 text-primary')}>
               <ThumbsDown size={15} />
             </button>
             {msg.feedbackError && <span role="alert" className="text-xs text-danger">{msg.feedbackError}</span>}
@@ -1264,6 +1294,7 @@ function ResultCard({
   layout?: 'list' | 'carousel'
 }) {
   const [photoFailed, setPhotoFailed] = useState(false)
+  const t = useT()
   const carousel = layout === 'carousel'
 
   if (result.kind === 'itinerary') {
@@ -1341,7 +1372,7 @@ function ResultCard({
         <span className="block truncate font-semibold">{result.name}</span>
         <span className="block truncate text-sm text-fg-2">{[result.type, result.city, result.priceRange].filter(Boolean).join(' · ')}</span>
         {result.address && <span className="block truncate text-xs text-fg-2">{result.address}</span>}
-        {carousel && <span className="mt-2 block text-xs font-semibold text-link">Tingnan ang profile →</span>}
+        {carousel && <span className="mt-2 block text-xs font-semibold text-link">{t('Tingnan ang profile →', 'View profile →')}</span>}
       </span>
       {!carousel && result.verified && (
         <span className="shrink-0 rounded-full bg-primary/15 px-2 py-1 text-[11px] font-semibold text-primary">Verified</span>
