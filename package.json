@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "npm run test:jimbot && npm run test:auth",
+    "prebuild": "npm run test:jimbot-ai && npm run test:auth",
     "build": "vite build",
-    "test:jimbot": "node tests/jimbot-intents.mjs",
-    "test:jimbot-ai": "node tests/jimbot-ai/parse-plan-hints.mjs && node tests/jimbot-ai/normalize-itinerary.mjs",
+    "test:jimbot": "npm run test:jimbot-ai",
+    "test:jimbot-ai": "node tests/jimbot-ai/sanitize-schema.mjs && node tests/jimbot-ai/parse-plan-hints.mjs && node tests/jimbot-ai/normalize-itinerary.mjs && node tests/jimbot-ai/jimbot-trip.mjs && node tests/jimbot-ai/run.mjs",
+    "embed:businesses": "node scripts/embed-businesses.mjs",
     "test:auth": "node tests/auth-flow.mjs",
     "preview": "vite preview",
     "format": "oxfmt"
@@ -34,6 +35,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.0",
     "oxfmt": "^0.2.0",
+    "playwright": "^1.65.1",
     "sass": "^1.107.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",

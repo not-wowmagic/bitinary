@@ -1,0 +1,232 @@
+[
+  {
+    "type": "function",
+    "name": "search_verified_businesses",
+    "description": "Search Bitinary businesses for itinerary planning. area is required (city name). Server filters live+verified in that city, then ranks (embeddings when available, else text). Prefer one broad search per turn. Returns up to 8 exact business IDs. Never invent an ID.",
+    "strict": true,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": ["string", "null"],
+          "description": "City or area to search, for example \"Quezon City\". Required for search; if unknown, ask the user instead of calling with null."
+        },
+        "query": {
+          "type": ["string", "null"],
+          "description": "Short search phrase for business name, type, specialty, or vibe, for example \"budget seafood\". Use null when filters are enough."
+        },
+        "businessType": {
+          "type": ["string", "null"],
+          "description": "Requested business category, for example \"restaurant\", \"cafe\", or \"attraction\". Use null when unspecified."
+        },
+        "maxResults": {
+          "type": "integer",
+          "description": "Maximum number of results to return, from 1 to 10. Example: 5.",
+          "minimum": 1,
+          "maximum": 10
+        }
+      },
+      "required": ["area", "query", "businessType", "maxResults"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_business_details",
+    "description": "Get itinerary-relevant details for one exact business ID previously returned by a Jimbot business tool. The server must reject unknown, non-live, or non-verified IDs. Returns the verified business's address, coordinates, hours, and listed prices when available.",
+    "strict": true,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "businessId": {
+          "type": "string",
+          "description": "Exact UUID returned by search_verified_businesses or another trusted tool result. Example: \"f47ac10b-58cc-4372-a567-0e02b2c3d479\". Never invent or transform this value.",
+          "format": "uuid"
+        }
+      },
+      "required": ["businessId"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_user_preferences",
+    "description": "Read the signed-in traveler's planning preferences only after the client has supplied consentGranted=true for this request. Returns planning-relevant preferences only, such as budget, food, interests, companions, transport, pace, and needs. Do not call when consent is absent.",
+    "strict": true,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "consentGranted": {
+          "type": "boolean",
+          "description": "Must be true only when the client has recorded the user's consent to use their travel preferences for this request.",
+          "enum": [true]
+        }
+      },
+      "required": ["consentGranted"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_saved_itineraries",
+    "description": "List the signed-in user's saved itineraries for reference or revision. Returns up to 10 user-owned itinerary IDs with title, area, budget, and stops. It never returns another user's itineraries.",
+    "strict": true,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": ["string", "null"],
+          "description": "Optional city or area filter, for example \"Baguio\". Use null for all areas."
+        },
+        "maxResults": {
+          "type": "integer",
+          "description": "Maximum itineraries to return, from 1 to 10. Example: 5.",
+          "minimum": 1,
+          "maximum": 10
+        }
+      },
+      "required": ["area", "maxResults"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "build_itinerary_draft",
+    "description": "Build a read-only itinerary and budget draft from exact verified business IDs already returned by Jimbot tools. This does not write to the database and returns a draft payload for the client to show and revise.",
+    "strict": true,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string",
+          "description": "Plan area, for example \"Baguio City\".",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "days": {
+          "type": "integer",
+          "description": "Number of itinerary days, from 1 to 14. Example: 2.",
+          "minimum": 1,
+          "maximum": 14
+        },
+        "budgetPhp": {
+          "type": ["number", "null"],
+          "description": "Total budget in Philippine pesos. Use null when the user did not provide one. Example: 3000.",
+          "minimum": 0
+        },
+        "businessIds": {
+          "type": "array",
+          "description": "One to 20 exact verified business UUIDs returned by prior Jimbot tool results. Never invent IDs.",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true
+        }
+      },
+      "required": ["area", "days", "budgetPhp", "businessIds"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "show_map_points",
+    "description": "Return map points for exact verified business IDs already returned by Jimbot tools. Omits businesses without latitude and longitude; never estimates coordinates or invents IDs.",
+    "strict": true,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "businessIds": {
+          "type": "array",
+          "description": "One to 20 exact verified business UUIDs from prior Jimbot tool results.",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true
+        }
+      },
+      "required": ["businessIds"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "save_itinerary",
+    "description": "Save a reviewed itinerary draft for the signed-in user. Call only after the user explicitly confirms saving in this turn and the client sends explicitConfirmed=true. The server MUST reject any request without explicitConfirmed=true. Business IDs must be exact verified IDs from prior Jimbot tool results.",
+    "strict": true,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "explicitConfirmed": {
+          "type": "boolean",
+          "description": "Must be true only after an explicit user save confirmation in this turn, such as a Save button tap or \"oo, i-save mo na\".",
+          "enum": [true]
+        },
+        "title": {
+          "type": "string",
+          "description": "User-visible itinerary title, for example \"2 Days in Baguio\".",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "area": {
+          "type": "string",
+          "description": "Itinerary area, for example \"Baguio City\".",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "budgetPhp": {
+          "type": "number",
+          "description": "Total itinerary budget in Philippine pesos. Example: 3000.",
+          "minimum": 0
+        },
+        "stops": {
+          "type": "array",
+          "description": "Ordered itinerary stops from the reviewed draft. One to 42 stops.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "businessId": {
+                "type": "string",
+                "description": "Exact verified business UUID from a prior Jimbot tool result.",
+                "format": "uuid"
+              },
+              "stopTime": {
+                "type": "string",
+                "description": "Display time for this stop, for example \"09:00\".",
+                "minLength": 1,
+                "maxLength": 20
+              },
+              "kind": {
+                "type": "string",
+                "description": "Short stop category, for example \"food\" or \"activity\".",
+                "minLength": 1,
+                "maxLength": 40
+              },
+              "costPhp": {
+                "type": "number",
+                "description": "Estimated stop cost in Philippine pesos. Example: 250.",
+                "minimum": 0
+              },
+              "note": {
+                "type": ["string", "null"],
+                "description": "Optional short planning note. Use null when none.",
+                "maxLength": 500
+              }
+            },
+            "required": ["businessId", "stopTime", "kind", "costPhp", "note"],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 42
+        }
+      },
+      "required": ["explicitConfirmed", "title", "area", "budgetPhp", "stops"],
+      "additionalProperties": false
+    }
+  }
+]

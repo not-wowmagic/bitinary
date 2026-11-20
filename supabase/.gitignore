@@ -1,0 +1,10 @@
+# Supabase
+.branches
+.temp
+
+# dotenvx / local secrets (never commit API keys)
+.env
+.env.*
+.env.keys
+.env.local
+.env.*.local
