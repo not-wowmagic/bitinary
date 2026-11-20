@@ -122,13 +122,23 @@ These are internal tools and should not be included in customer pricing:
 
 ## Pricing and release notes
 
-### Traveler pricing is not defined in the app
+### Traveler plans
 
-The current code does not define traveler subscription plans, usage quotas, or paid traveler entitlements. Any traveler pricing would be a new business decision rather than an existing app rule.
+- **Free (Guest and Traveler): PHP 0** - verified business search and profiles; call, website and Google Maps directions; saved businesses; likes, comments and reviews; basic Jimbot; itinerary editing and up to three saved trips; basic private Moments; PWA install; English and Tagalog.
+- **Traveler Premium: PHP 149/month or PHP 1,490/year** - unlimited saved trips, extended Jimbot conversation history, and Moments collaborators with extra photos and storage. The annual plan represents 10 months of the monthly price.
 
-### Current business plan screen is a mock
+The traveler billing sheet is a presentation mock; subscription quotas and entitlements are not enforced in the current app.
 
-The business billing screen currently displays a draft **Free** plan and **Plus at PHP 499/month**. Its sample Free feature list includes a profile, Quick Update, posts, and basic stats; the sample Plus list includes analytics/weekly reports, up to three branches, and priority support. These are pricing concepts shown in the UI, not an active subscription product:
+### Business plans and add-ons
+
+- **Business Free: PHP 0** - business profile and verification submission, Quick Update, posts, basic stats, and Profile Health Score.
+- **Business Plus: PHP 499/month** - analytics and report export, up to three branches, priority support, QR check-in materials, and deals after verification.
+- **Team and Institutional Seats: PHP 550 per seat/year** - manager and staff accounts plus shared Quick Update and posting.
+- **Business Onboarding Setup: PHP 500 per business** - assisted profile setup and verification-document help.
+- **Post Boosting: from PHP 100** - custom budget; every PHP 10 added reaches an additional 30 people, with 300 people at the PHP 100 minimum.
+- **Banner Ads: PHP 300 per banner/week** - traveler-app banner placement after review.
+
+These are pricing concepts shown in the billing UI, not active subscription products:
 
 - Plan selection is local UI state; it does not create or enforce a subscription.
 - Payment methods and invoices are sample records; there is no completed payment-provider integration.

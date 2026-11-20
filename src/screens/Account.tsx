@@ -20,7 +20,7 @@ import { isGoogleOnlyAccount } from '@/lib/authFlow'
 import { useInstallPrompt } from '@/lib/useInstallPrompt'
 import { supabase } from '@/lib/supabase'
 
-type SheetKey = 'profile' | 'security' | 'saved' | 'trips' | 'budget' | 'notif' | 'privacy' | 'help' | 'lang' | null
+type SheetKey = 'profile' | 'security' | 'saved' | 'trips' | 'budget' | 'billing' | 'notif' | 'privacy' | 'help' | 'lang' | null
 type SavedBusiness = { id: string; name: string; business_type: string | null; address: string; city: string }
 type SavedTrip = { id: string; title: string; subtitle: string | null; area: string | null; budget: number }
 
@@ -212,6 +212,7 @@ export function Account() {
         <Item icon={<Bookmark size={19} />} color="#D32F2F" label={t('Naka-save', 'Saved')} value={accountDataLoading ? '…' : String(savedBusinesses.length)} onClick={() => setSheet('saved')} />
         <Item icon={<MapIcon size={19} />} color="#1B8A3A" label={t('Mga biyahe', 'Trips')} value={accountDataLoading ? '…' : String(savedTrips.length)} onClick={() => setSheet('trips')} />
         <Item icon={<Wallet size={19} />} color="#FFB400" iconFg="#2B130A" label={t('Kagustuhan sa badyet', 'Budget preferences')} value={`${peso(prefs.dailyBudget)}/${t('araw', 'day')}`} onClick={() => navigate('/personalize/budget?from=prefs')} />
+        <Item icon={<Wallet size={19} />} color="#6B3A22" iconFg="#FFF" label={t('Plan at bayad', 'Plan and billing')} value={t('Libre', 'Free')} onClick={() => setSheet('billing')} />
       </Group>
 
       <Group title={t('Aplikasyon', 'App')}>
@@ -302,6 +303,44 @@ export function Account() {
           ))}
           {!accountDataLoading && !savedTrips.length && <p className="py-6 text-center text-body text-fg-2">{t('Wala pang naka-save na biyahe.', 'No saved trips yet.')}</p>}
           {accountDataLoading && <p className="py-6 text-center text-body text-fg-2">{t('Kinukuha ang mga biyahe…', 'Loading trips…')}</p>}
+        </div>
+      </Sheet>
+      <Sheet open={sheet === 'billing'} onClose={() => setSheet(null)} title={t('Plan at bayad', 'Plan and billing')}>
+        <div className="grid gap-3">
+          {([
+            [
+              'Free',
+              '₱0',
+              [
+                t('Verified business search at profiles', 'Verified business search and profiles'),
+                t('Saved businesses at hanggang 3 saved trips', 'Saved businesses and up to 3 saved trips'),
+                t('Basic Jimbot at private Moments', 'Basic Jimbot and private Moments'),
+                t('Likes, comments, reviews at PWA', 'Likes, comments, reviews and PWA'),
+              ],
+            ],
+            [
+              'Traveler Premium',
+              '₱149 / month',
+              [
+                t('Unlimited na saved trips', 'Unlimited saved trips'),
+                t('Mas mahabang Jimbot history', 'Extended Jimbot conversation history'),
+                t('Moments collaborators, extra photos at storage', 'Moments collaborators, extra photos and storage'),
+              ],
+            ],
+          ] as const).map(([name, price, features]) => (
+            <div key={name} className="rounded-[20px] bg-surface p-4 shadow-card">
+              <p className="font-display text-[20px] font-bold">{name}</p>
+              <p className="mt-1 font-display text-[28px] font-bold">{price}</p>
+              {name === 'Traveler Premium' && (
+                <p className="mt-1 text-[13px] font-semibold text-link">
+                  ₱1,490 / year · {t('10 buwan para sa 12', '10 months for 12')}
+                </p>
+              )}
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-[15px] text-fg-2">
+                {features.map((feature) => <li key={feature}>{feature}</li>)}
+              </ul>
+            </div>
+          ))}
         </div>
       </Sheet>
       <Sheet open={sheet === 'lang'} onClose={() => setSheet(null)} title={lang === 'en' ? 'Language' : 'Wika'}>
