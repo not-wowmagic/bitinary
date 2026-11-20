@@ -139,7 +139,7 @@ export function CreateMoment() {
             <span className="flex items-center gap-1.5 text-body font-semibold">
               <Share2 size={17} /> I-share pagkatapos i-save
             </span>
-            <span className="block text-caption text-fg-2">Naka-off bilang default. Pribado ang Moments mo.</span>
+            <span className="block text-caption text-fg-2">{shareOn ? 'Isha-share sa mapa at gallery.' : 'Naka-off bilang default. Pribado ang Moments mo.'}</span>
           </span>
           <Toggle label="I-share" checked={shareOn} onChange={setShareOn} />
         </section>

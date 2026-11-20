@@ -997,11 +997,11 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
             </h1>
             <p className="text-caption text-fg-2">{thinking ? 'Nag-iisip…' : online ? 'AI travel buddy mo · Tagalog / Bisaya / English' : 'Offline'}</p>
           </div>
-          <Button size="sm" variant="secondary" icon={<Plus size={16} />} onClick={startNewConversation} disabled={thinking || switchingConversation || historyLoading}>
-            Bago
+          <Button size="sm" variant="secondary" icon={<Plus size={16} />} onClick={startNewConversation} disabled={thinking || switchingConversation || historyLoading} aria-label="Bago">
+            <span className="hidden sm:inline">Bago</span>
           </Button>
-          <Button size="sm" variant="secondary" icon={<PiggyBank size={16} />} onClick={() => setBudgetOpen(true)}>
-            Budget
+          <Button size="sm" variant="secondary" icon={<PiggyBank size={16} />} onClick={() => setBudgetOpen(true)} aria-label="Budget">
+            <span className="hidden sm:inline">Budget</span>
           </Button>
         </div>
       </header>
@@ -1065,7 +1065,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
               ) : (
                 <>
                   {conversationError && <p role="alert" className="text-center text-sm text-danger">Hindi ma-load ang usapan. Subukan itong buksan ulit.</p>}
-                  <p className="text-center text-caption text-fg-2">Ngayon · Tagalog, Bisaya, at English</p>
+                  <p className="text-center text-caption text-fg-2">Ngayon</p>
                   {messages.map((m) =>
                     m.role === 'user' ? (
                       <UserBubble key={m.id} text={m.text} />
