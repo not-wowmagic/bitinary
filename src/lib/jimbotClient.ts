@@ -147,9 +147,6 @@ async function hydrateBot(bot: JimbotBotFields): Promise<JimbotBotFields> {
 export async function askJimbot(req: JimbotAiRequest): Promise<JimbotAiResult> {
   const fail: JimbotAiResult = { ok: false, bot: { text: FALLBACK_TEXT }, payload: null }
   try {
-    // #region agent log
-    fetch('http://127.0.0.1:7399/ingest/ec80a9dc-6c58-4d64-b3fb-c125778dd2c7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'64993e'},body:JSON.stringify({sessionId:'64993e',hypothesisId:'B',location:'jimbotClient.ts:ask',message:'invoke start',data:{msgLen:req.message?.length??0,hist:(req.history??[]).length,hasCtx:!!req.planningContext},timestamp:Date.now(),runId:'post-fix'})}).catch(()=>{});
-    // #endregion
     const { data, error } = await supabase.functions.invoke('jimbot', {
       body: {
         message: req.message,
@@ -160,9 +157,6 @@ export async function askJimbot(req: JimbotAiRequest): Promise<JimbotAiResult> {
       },
     })
     if (error || !data || typeof data !== 'object') {
-      // #region agent log
-      fetch('http://127.0.0.1:7399/ingest/ec80a9dc-6c58-4d64-b3fb-c125778dd2c7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'64993e'},body:JSON.stringify({sessionId:'64993e',hypothesisId:'B',location:'jimbotClient.ts:invoke-fail',message:'invoke error or bad data',data:{err:String(error?.message??error??'no-data'),hasData:!!data},timestamp:Date.now(),runId:'post-fix'})}).catch(()=>{});
-      // #endregion
       return fail
     }
     const d = data as Record<string, any>
@@ -170,9 +164,6 @@ export async function askJimbot(req: JimbotAiRequest): Promise<JimbotAiResult> {
     // Edge function returns its own generic fallback (with a warning) when OpenAI fails.
     const warnings = arr<string>(d.warnings)
     const tempIssue = !!warnings?.some((w) => w.startsWith('Temporary issue'))
-    // #region agent log
-    fetch('http://127.0.0.1:7399/ingest/ec80a9dc-6c58-4d64-b3fb-c125778dd2c7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'64993e'},body:JSON.stringify({sessionId:'64993e',hypothesisId:'A',location:'jimbotClient.ts:response',message:'edge response',data:{textLen:text.length,tempIssue,warnings:warnings??[],hasDraft:!!d.itineraryDraft,refusal:d.refusal??null,msgPreview:text.slice(0,80)},timestamp:Date.now(),runId:'post-fix'})}).catch(()=>{});
-    // #endregion
     if (!text || tempIssue) return fail
     const map = d.map && Array.isArray(d.map.businessIds) && d.map.businessIds.length ? d.map : null
     const raw: JimbotBotFields = {
@@ -192,9 +183,6 @@ export async function askJimbot(req: JimbotAiRequest): Promise<JimbotAiResult> {
     return { ok: true, bot, payload: structured as Record<string, unknown>, savedItineraryId }
   } catch (e) {
     console.error('Jimbot AI call failed', e)
-    // #region agent log
-    fetch('http://127.0.0.1:7399/ingest/ec80a9dc-6c58-4d64-b3fb-c125778dd2c7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'64993e'},body:JSON.stringify({sessionId:'64993e',hypothesisId:'D',location:'jimbotClient.ts:catch',message:'client exception',data:{err:String(e)},timestamp:Date.now(),runId:'post-fix'})}).catch(()=>{});
-    // #endregion
     return fail
   }
 }

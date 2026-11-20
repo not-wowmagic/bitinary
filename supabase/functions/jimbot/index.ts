@@ -266,25 +266,6 @@ Deno.serve(async (req) => {
     return jsonResponse(sanitized, 200);
   } catch (error) {
     console.error("jimbot: OpenAI loop failed", error);
-    // #region agent log
-    try {
-      await fetch("http://host.docker.internal:7399/ingest/ec80a9dc-6c58-4d64-b3fb-c125778dd2c7", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "64993e" },
-        body: JSON.stringify({
-          sessionId: "64993e",
-          hypothesisId: "A",
-          location: "jimbot/index.ts:catch",
-          message: "OpenAI loop failed",
-          data: { err: String(error), name: (error as Error)?.name, stack: String((error as Error)?.stack ?? "").slice(0, 400) },
-          timestamp: Date.now(),
-          runId: "post-fix",
-        }),
-      });
-    } catch {
-      /* ignore debug ingest */
-    }
-    // #endregion
     return jsonResponse(FALLBACK_RESPONSE, 200);
   }
 });
@@ -1238,9 +1219,6 @@ async function synthesizeDraftFromIds(
   const hints: PlanHints =
     clone._planHints ??
     parsePlanHints(typeof clone._userMessage === "string" ? clone._userMessage : "");
-  // #region agent log
-  console.error("jimbot:dbg synthesizeDraft", { overnight: hints.overnight, placeCount: ordered.length });
-  // #endregion
   const selected = pickDiverseStops(ordered, {
     days: hints.days,
     overnight: hints.overnight === true,
