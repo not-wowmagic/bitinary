@@ -2,6 +2,12 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 import Ajv2020 from "ajv/dist/2020.js";
 import { SYSTEM_PROMPT } from "./system_prompt.ts";
+import {
+  estimateCostFromPriceRange,
+  normalizeItineraryDraft,
+  pickDiverseStops,
+  type PlaceMeta,
+} from "./normalize.ts";
 import TOOLS from "./tools.json" with { type: "json" };
 import RESPONSE_SCHEMA_RAW from "./response-schema.json" with { type: "json" };
 
@@ -54,7 +60,7 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 const RESPONSE_SCHEMA_FOR_OPENAI = sanitizeSchemaForOpenAI(RESPONSE_SCHEMA_RAW);
 const TOOLS_FOR_OPENAI = sanitizeToolsForOpenAI(TOOLS);
 const ajv = new Ajv2020({ allErrors: true, strict: false });
-const validateFinalResponse = ajv.compile(RESPONSE_SCHEMA_RAW);
+const validateFinalResponse = ajv.compile(withServerOnlyDraftFields(RESPONSE_SCHEMA_RAW));
 
 const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
@@ -695,57 +701,35 @@ async function buildItineraryDraft(args: Record<string, unknown>, context: ToolC
 
   const { data: businesses, error } = await context.supabase
     .from("businesses")
-    .select("id,name,business_type,price_range")
+    .select(PLACE_META_COLUMNS)
     .in("id", validIds);
 
   if (error || !businesses) {
     return { ok: false, code: "tool_unavailable", message: "Failed to load businesses for draft" };
   }
 
-  const stopsPerDay = Math.max(1, Math.ceil(businesses.length / days));
-  let total = 0;
-  const lines: Array<{ label: string; amount: number; businessId: string }> = [];
-  const draftDays: Array<{ day: number; stops: Array<Record<string, unknown>> }> = [];
-
-  for (let day = 1; day <= days; day += 1) {
-    const start = (day - 1) * stopsPerDay;
-    const dayBusinesses = businesses.slice(start, start + stopsPerDay);
-    const stops = dayBusinesses.map((biz, idx) => {
-      const estCost = estimateCostFromPriceRange(biz.price_range);
-      total += estCost;
-      lines.push({
-        label: biz.name,
-        amount: estCost,
-        businessId: String(biz.id),
-      });
-      const hour = 9 + idx * 3;
-      return {
-        time: `${String(hour).padStart(2, "0")}:00`,
-        businessId: biz.id,
-        note: biz.business_type ? `${biz.business_type} stop` : null,
-        estCost,
-      };
-    });
-    draftDays.push({ day, stops });
-  }
-
-  return {
-    ok: true,
+  const userHints = parsePlanHints(context.userMessage);
+  const result = normalizeItineraryDraft({
     draft: {
       title: `${days}-Day ${area} Plan`,
       area,
-      days: draftDays,
+      days: [{
+        day: 1,
+        stops: validIds.map((id) => ({ time: null, businessId: id, note: null, estCost: null })),
+      }],
     },
+    placesMeta: businesses as PlaceMeta[],
+    hints: { ...userHints, days, budgetPhp: budgetPhp ?? userHints.budgetPhp },
+  });
+
+  return {
+    ok: true,
+    draft: result.draft,
     budget: {
-      currency: "PHP",
-      limit: budgetPhp,
-      total,
-      perPerson: null,
-      isEstimate: true,
-      lines,
-      overBudget: budgetPhp != null ? total > budgetPhp : false,
+      ...result.budgetPatch,
+      overBudget: result.budgetPatch.limit != null && result.budgetPatch.total > result.budgetPatch.limit,
     },
-    warnings: budgetPhp != null && total > budgetPhp ? ["Plan is currently over budget."] : [],
+    warnings: result.warnings,
   };
 }
 
@@ -936,19 +920,29 @@ async function fetchBusinessNames(supabase: SupabaseClient, businessIds: string[
   return new Map((data ?? []).map((row) => [String(row.id), String(row.name ?? "Unknown")]));
 }
 
-function estimateCostFromPriceRange(priceRange: string | null): number {
-  if (!priceRange) return 300;
-  const normalized = priceRange.toLowerCase();
-  if (normalized.includes("₱") && normalized.includes("-")) {
-    const numbers = [...normalized.matchAll(/(\d{2,6})/g)].map((m) => Number(m[1]));
-    if (numbers.length >= 2) {
-      return Math.round((numbers[0] + numbers[1]) / 2);
-    }
+const PLACE_META_COLUMNS = "id,name,business_type,price_range,city,latitude,longitude";
+
+async function fetchPlaceMeta(supabase: SupabaseClient, businessIds: string[]): Promise<PlaceMeta[]> {
+  if (businessIds.length === 0) return [];
+  const { data } = await supabase.from("businesses").select(PLACE_META_COLUMNS).in("id", businessIds);
+  return (data ?? []).map((row: any) => ({ ...row, id: String(row.id) }));
+}
+
+/** Last scheduling pass: caps, lodging, times, day split, and budget rebuilt from listed prices. */
+function applyNormalizedDraft(clone: any, placesMeta: PlaceMeta[], hints: PlanHints) {
+  if (!clone.itineraryDraft) return;
+  const result = normalizeItineraryDraft({
+    draft: clone.itineraryDraft,
+    placesMeta,
+    hints,
+    previousBudget: clone.budget,
+  });
+  clone.itineraryDraft = result.draft;
+  clone.budget = result.budgetPatch;
+  if (!Array.isArray(clone.warnings)) clone.warnings = [];
+  for (const w of result.warnings) {
+    if (!clone.warnings.includes(w)) clone.warnings.push(w);
   }
-  if (normalized.includes("cheap") || normalized.includes("budget")) return 200;
-  if (normalized.includes("mid")) return 500;
-  if (normalized.includes("lux") || normalized.includes("high")) return 1200;
-  return 350;
 }
 
 async function sanitizeAndRevalidateBusinessIds(
@@ -1009,9 +1003,34 @@ async function sanitizeAndRevalidateBusinessIds(
         return keep;
       });
     }
+    if (
+      typeof clone.itineraryDraft.lodgingBusinessId === "string" &&
+      !validIds.has(clone.itineraryDraft.lodgingBusinessId)
+    ) {
+      clone.itineraryDraft.lodgingBusinessId = null;
+      stripped += 1;
+    }
     // Drop empty draft shells
     if (!clone.itineraryDraft.days.some((d: any) => Array.isArray(d?.stops) && d.stops.length > 0)) {
       clone.itineraryDraft = null;
+    }
+  }
+
+  if (clone.itineraryDraft) {
+    const draftIds = collectBusinessIds({ itineraryDraft: clone.itineraryDraft });
+    const lodgingId = clone.itineraryDraft.lodgingBusinessId;
+    if (typeof lodgingId === "string") draftIds.push(lodgingId);
+    applyNormalizedDraft(
+      clone,
+      await fetchPlaceMeta(supabase, draftIds),
+      parsePlanHints(toolContext?.userMessage ?? ""),
+    );
+    // Lodging left the timed stops but still needs a card + pin.
+    const lodging = clone.itineraryDraft.lodgingBusinessId;
+    if (typeof lodging === "string" && Array.isArray(clone.places)) {
+      if (!clone.places.some((p: any) => p?.businessId === lodging)) {
+        clone.places.unshift({ businessId: lodging, reason: null });
+      }
     }
   }
 
@@ -1099,16 +1118,6 @@ async function sanitizeAndRevalidateBusinessIds(
   return clone;
 }
 
-const MAX_SYNTH_STOPS = 5;
-
-type BizRowLite = {
-  id: string;
-  name: string;
-  business_type: string | null;
-  price_range: string | null;
-  city: string | null;
-};
-
 type PlanHints = {
   budgetPhp: number | null;
   people: number | null;
@@ -1178,53 +1187,6 @@ function parsePlanHints(message: string): PlanHints {
   };
 }
 
-function typeBucket(businessType: string | null): "cafe" | "food" | "activity" | "stay" | "other" {
-  const t = (businessType ?? "").toLowerCase();
-  if (/hotel|hostel|resort/.test(t)) return "stay";
-  if (/kapihan|cafe|coffee|tea/.test(t)) return "cafe";
-  if (/kainan|restaurant|food|resto|eatery|grill/.test(t)) return "food";
-  if (/attraction|pasyalan|museum|park|shop|mall|gallery|tour|activity/.test(t)) return "activity";
-  return "other";
-}
-
-/** Prefer a day arc: cafe → food → activity → food → leftover (≤ MAX_SYNTH_STOPS). */
-function pickDiverseStops(rows: BizRowLite[], limit = MAX_SYNTH_STOPS, overnight = false): BizRowLite[] {
-  const pools: Record<"cafe" | "food" | "activity" | "stay" | "other", BizRowLite[]> = {
-    cafe: [],
-    food: [],
-    activity: [],
-    stay: [],
-    other: [],
-  };
-  for (const row of rows) pools[typeBucket(row.business_type)].push(row);
-
-  const picked: BizRowLite[] = [];
-  const used = new Set<string>();
-  const take = (bucket: keyof typeof pools) => {
-    const next = pools[bucket].find((r) => !used.has(r.id));
-    if (!next || picked.length >= limit) return;
-    used.add(next.id);
-    picked.push(next);
-  };
-
-  if (overnight) take("stay");
-  take("cafe");
-  take("food");
-  take("activity");
-  take("food");
-  take("other");
-  take("cafe");
-  take("activity");
-
-  for (const row of rows) {
-    if (picked.length >= limit) break;
-    if (used.has(row.id)) continue;
-    used.add(row.id);
-    picked.push(row);
-  }
-  return picked;
-}
-
 async function buildFallbackPlanFromTrustedIds(
   supabase: SupabaseClient,
   toolContext: ToolContext,
@@ -1259,7 +1221,8 @@ async function buildFallbackPlanFromTrustedIds(
     hints.areaHint ||
     "biyahe mo";
   const n = stopIds.length;
-  shell.message = `Eto ang 1-day plan mo sa ${area} (${n} stop${n === 1 ? "" : "s"}). Tingnan mo ang cards, tapos sabihin kung i-save.`;
+  const dayCount = Array.isArray(shell.itineraryDraft?.days) ? shell.itineraryDraft.days.length : 1;
+  shell.message = `Eto ang ${dayCount}-day plan mo sa ${area} (${n} stop${n === 1 ? "" : "s"}). Tingnan mo ang cards, tapos sabihin kung i-save.`;
   enforceShortChatMessage(shell);
   delete shell._planHints;
   return shell;
@@ -1270,61 +1233,38 @@ async function synthesizeDraftFromIds(
   placeIds: string[],
   clone: any,
 ): Promise<Record<string, unknown>> {
-  const { data } = await supabase
-    .from("businesses")
-    .select("id,name,business_type,price_range,city")
-    .in("id", placeIds);
-  const byId = new Map((data ?? []).map((row) => [String(row.id), row]));
-  const ordered = placeIds.map((id) => byId.get(id)).filter(Boolean) as BizRowLite[];
+  const meta = await fetchPlaceMeta(supabase, placeIds);
+  const byId = new Map(meta.map((row) => [row.id, row]));
+  const ordered = placeIds.map((id) => byId.get(id)).filter((row): row is PlaceMeta => !!row);
   const hints: PlanHints =
     clone._planHints ??
     parsePlanHints(typeof clone._userMessage === "string" ? clone._userMessage : "");
   // #region agent log
   console.error("jimbot:dbg synthesizeDraft", { overnight: hints.overnight, placeCount: ordered.length });
   // #endregion
-  const selected = pickDiverseStops(ordered, MAX_SYNTH_STOPS, hints.overnight === true);
+  const selected = pickDiverseStops(ordered, {
+    days: hints.days,
+    overnight: hints.overnight === true,
+    foodTrip: hints.foodTrip === true,
+  });
 
   const area =
     (typeof clone.itineraryDraft?.area === "string" && clone.itineraryDraft.area) ||
     selected[0]?.city ||
     hints.areaHint ||
     null;
-  const hours = ["09:00", "12:00", "15:00", "18:00", "20:00"];
-  const stops = selected.map((row, i) => ({
-    time: hours[i] ?? null,
-    businessId: row.id,
-    note: row.business_type,
-    estCost: estimateCostFromPriceRange(row.price_range),
-  }));
-
-  if (!clone.budget) {
-    const total = stops.reduce((sum, s) => sum + (s.estCost ?? 0), 0);
-    const limit = hints.budgetPhp;
-    const people = hints.people;
-    const perPerson = people && people >= 2 ? Math.round(total / people) : null;
-    clone.budget = {
-      currency: "PHP",
-      limit,
-      total,
-      perPerson,
-      isEstimate: true,
-      lines: stops.map((s, i) => ({
-        label: selected[i]?.name ?? "Stop",
-        amount: s.estCost ?? 0,
-        businessId: s.businessId,
-      })),
-    };
-    if (!Array.isArray(clone.warnings)) clone.warnings = [];
-    if (limit != null && total > limit) {
-      clone.warnings.push("Plan is currently over budget.");
-    }
-  }
-
-  return {
-    title: area ? `1-day plan · ${area}` : "1-day plan",
+  clone.itineraryDraft = {
+    title: "",
     area,
-    days: [{ day: 1, stops }],
+    days: [{
+      day: 1,
+      stops: selected.map((row) => ({ time: null, businessId: row.id, note: row.business_type, estCost: null })),
+    }],
   };
+  applyNormalizedDraft(clone, meta, hints);
+  const dayLabel = `${clone.itineraryDraft.days.length}-day plan`;
+  clone.itineraryDraft.title = area ? `${dayLabel} · ${area}` : dayLabel;
+  return clone.itineraryDraft;
 }
 
 /** Models often dump markdown into message; keep chat text short and card-friendly. */
@@ -1433,6 +1373,16 @@ function sanitizeToolsForOpenAI(tools: unknown): unknown {
     clean[key] = sanitizeToolsForOpenAI(value);
   }
   return clean;
+}
+
+/** Server-added draft fields the model never emits (kept out of the OpenAI strict schema). */
+function withServerOnlyDraftFields(schema: any): any {
+  const clone = structuredClone(schema);
+  const draft = clone?.properties?.itineraryDraft;
+  if (draft?.properties) {
+    draft.properties.lodgingBusinessId = { type: ["string", "null"] };
+  }
+  return clone;
 }
 
 function sanitizeSchemaForOpenAI(schema: unknown): unknown {
