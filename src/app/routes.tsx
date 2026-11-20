@@ -1,4 +1,5 @@
 import { Link, Navigate, createBrowserRouter, useLocation, useRouteError } from 'react-router'
+import { useT } from '@/app/i18n'
 import { AppShell } from '@/components/layout/AppShell'
 import { AccountHome, BillingPage, HelpPage, PreferencesPage, ProfilePage, TeamPage } from '@/biz/pages/Account'
 import { Analytics } from '@/biz/pages/Analytics'
@@ -47,27 +48,28 @@ const basename = new URL(import.meta.env.BASE_URL, window.location.origin).pathn
 function RouteErrorFallback() {
   const error = useRouteError()
   const { pathname } = useLocation()
+  const t = useT()
   const businessRoute = pathname.startsWith('/biz')
-  const detail = error instanceof Error ? error.message : 'An unexpected application error occurred.'
+  const detail = error instanceof Error ? error.message : t('Isang hindi inaasahang problema ang nangyari sa application.', 'An unexpected application error occurred.')
 
   return (
     <main className="grid min-h-dvh place-items-center bg-background px-5 py-10 text-fg">
       <section role="alert" className="w-full max-w-lg rounded-[28px] bg-surface p-7 shadow-card sm:p-9">
         <p className="font-display text-sm font-semibold uppercase tracking-wide text-primary">Bitinary</p>
-        <h1 className="mt-2 text-h2">Hindi maipakita ang page</h1>
+        <h1 className="mt-2 text-h2">{t('Hindi maipakita ang page', "Couldn't display the page")}</h1>
         <p className="mt-2 text-body text-fg-2">
-          Nagkaroon ng hindi inaasahang problema. Maaari mong subukang i-reload ang page o bumalik sa simula.
+          {t('Nagkaroon ng hindi inaasahang problema. Maaari mong subukang i-reload ang page o bumalik sa simula.', 'An unexpected problem occurred. You can reload the page or go back to the start.')}
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <button type="button" onClick={() => window.location.reload()} className="min-h-12 rounded-full bg-primary px-5 font-display font-semibold text-ink">
-            I-reload ang page
+            {t('I-reload ang page', 'Reload page')}
           </button>
           <Link to={businessRoute ? '/biz/language' : '/'} className="inline-flex min-h-12 items-center rounded-full border border-line px-5 font-display font-semibold">
-            Bumalik sa simula
+            {t('Bumalik sa simula', 'Back to start')}
           </Link>
         </div>
         <details className="mt-6 text-sm text-fg-2">
-          <summary className="cursor-pointer font-semibold">Mga teknikal na detalye</summary>
+          <summary className="cursor-pointer font-semibold">{t('Mga teknikal na detalye', 'Technical details')}</summary>
           <pre className="mt-2 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-background p-3 font-mono text-xs">{detail}</pre>
         </details>
       </section>

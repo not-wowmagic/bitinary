@@ -464,6 +464,15 @@ export function BizProvider({ children }: { children: ReactNode }) {
 
   const forced = getForcedState()
 
+  const lang: Lang =
+    queryLang() ??
+    (data.langPref === "device" ? deviceLang() : (data.langPref ?? "en"))
+
+  const t = useCallback(
+    (tl: string, en: string) => (lang === "en" ? en : tl),
+    [lang],
+  )
+
   useEffect(() => {
     let active = true
 
@@ -604,8 +613,8 @@ export function BizProvider({ children }: { children: ReactNode }) {
 
           text:
             error instanceof Error
-              ? `Using saved business data. Refresh failed: ${error.message}`
-              : "Using saved business data. Refresh failed.",
+              ? t(`Ginagamit ang naka-save na business data. Hindi ma-refresh: ${error.message}`, `Using saved business data. Refresh failed: ${error.message}`)
+              : t("Ginagamit ang naka-save na business data. Hindi ma-refresh.", "Using saved business data. Refresh failed."),
         })
 
         setLoadError(null)
@@ -613,7 +622,7 @@ export function BizProvider({ children }: { children: ReactNode }) {
         setLoadError(
           error instanceof Error
             ? error.message
-            : "Business data could not be loaded.",
+            : t("Hindi ma-load ang business data.", "Business data could not be loaded."),
         )
       }
 
@@ -623,7 +632,7 @@ export function BizProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false
     }
-  }, [loadVersion])
+  }, [loadVersion, t])
 
   useEffect(() => {
     const { data: authListener } = supabase.auth.onAuthStateChange(
@@ -710,15 +719,6 @@ export function BizProvider({ children }: { children: ReactNode }) {
     return v
   }, [data, forced])
 
-  const lang: Lang =
-    queryLang() ??
-    (data.langPref === "device" ? deviceLang() : (data.langPref ?? "en"))
-
-  const t = useCallback(
-    (tl: string, en: string) => (lang === "en" ? en : tl),
-    [lang],
-  )
-
   const set = useCallback((fn: (d: BizData) => BizData) => {
     saveQueue.current = saveQueue.current
       .then(async () => {
@@ -759,10 +759,10 @@ export function BizProvider({ children }: { children: ReactNode }) {
           text:
             error instanceof Error
               ? error.message
-              : "Business changes could not be saved.",
+              : t("Hindi ma-save ang mga pagbabago sa business.", "Business changes could not be saved."),
         })
       })
-  }, [])
+  }, [t])
 
   const showToast = useCallback(
     (x: Omit<Toast, "id">) => setToast({ ...x, id: Date.now() }),
@@ -794,17 +794,17 @@ export function BizProvider({ children }: { children: ReactNode }) {
       const message =
         cacheError instanceof Error
           ? cacheError.message
-          : "Browser cache could not be cleared."
+          : t("Hindi ma-clear ang cache ng browser.", "Browser cache could not be cleared.")
 
       showToast({
-        text: `Signed out, but Bitinary cache could not be cleared: ${message}`,
+        text: t(`Naka-sign out ka, pero hindi ma-clear ang cache ng Bitinary: ${message}`, `Signed out, but Bitinary cache could not be cleared: ${message}`),
       })
 
       return { error: message }
     }
 
     return { error: null }
-  }, [showToast])
+  }, [showToast, t])
 
   const status = statusOf(view.business)
 
@@ -845,11 +845,11 @@ export function BizProvider({ children }: { children: ReactNode }) {
 
     loadDemo: () =>
       showToast({
-        text: "Demo data is disabled for database-backed business accounts.",
+        text: t("Naka-disable ang demo data para sa database-backed business accounts.", "Demo data is disabled for database-backed business accounts."),
       }),
 
     reset: () =>
-      showToast({ text: "Business data cannot be reset from this screen." }),
+      showToast({ text: t("Hindi ma-reset ang business data mula sa screen na ito.", "Business data cannot be reset from this screen.") }),
   }
 
   return (
