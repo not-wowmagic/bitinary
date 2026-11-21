@@ -181,21 +181,23 @@ export function SearchScreen() {
 
       {!active ? (
         <div className="space-y-7 px-4 pt-4 md:px-0">
-          <section>
-            <h2 className="mb-1 text-h3">Mga huling hinanap</h2>
-            <ul>
-              {recent.map((r) => (
-                <li key={r} className="flex items-center border-b border-line">
-                  <button onClick={() => commit(r)} className="flex h-12 flex-1 items-center gap-3 text-left text-body">
-                    <Clock size={18} className="text-muted" /> {r}
-                  </button>
-                  <button aria-label={`Alisin ang ${r}`} onClick={() => setRecent((x) => x.filter((y) => y !== r))} className="flex h-11 w-11 items-center justify-center text-muted">
-                    <X size={16} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
+          {recent.length > 0 && (
+            <section>
+              <h2 className="mb-1 text-h3">Mga huling hinanap</h2>
+              <ul>
+                {recent.map((r) => (
+                  <li key={r} className="flex items-center border-b border-line">
+                    <button onClick={() => commit(r)} className="flex h-12 flex-1 items-center gap-3 text-left text-body">
+                      <Clock size={18} className="text-muted" /> {r}
+                    </button>
+                    <button aria-label={`Alisin ang ${r}`} onClick={() => setRecent((x) => x.filter((y) => y !== r))} className="flex h-11 w-11 items-center justify-center text-muted">
+                      <X size={16} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <section>
             <h2 className="mb-3 text-h3">Mga kategorya</h2>
             <div className="grid grid-cols-4 gap-2 @2xl:grid-cols-8">
