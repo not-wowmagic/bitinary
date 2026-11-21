@@ -408,6 +408,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
                         key={m.id}
                         msg={m}
                         showQuickReplies={m.id === lastBotId && !thinking}
+                        showFeedback={m.id === lastBotId && !thinking}
                         onPick={send}
                         onFeedback={(value) => sendFeedback(m.id, value)}
                         onOpenBusiness={(id) => navigate(`/shop/${id}`)}
@@ -508,6 +509,7 @@ function Thinking() {
 function BotReply({
   msg,
   showQuickReplies,
+  showFeedback,
   onPick,
   onFeedback,
   onOpenResult,
@@ -524,11 +526,13 @@ function BotReply({
   savedId?: string
   msg: BotMsg
   showQuickReplies: boolean
+  showFeedback: boolean
   onPick: (text: string) => void
   onFeedback: (value: 'up' | 'down') => void
   onOpenResult: (result: ChatResult) => void
 }) {
   const navigate = useNavigate()
+  const { t } = useLang()
   const big = msg.expression === 'unsure'
   const resultsTrackRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<HTMLElement>(null)
@@ -661,13 +665,13 @@ function BotReply({
             ))}
           </div>
         )}
-        {msg.id !== 'welcome' && (
+        {showFeedback && msg.id !== 'welcome' && (
           <div className="flex items-center gap-2 pt-1">
-            <span className="text-[12px] text-fg-2">Nakatulong ba ito?</span>
-            <button type="button" aria-label="Nakatulong" aria-pressed={msg.feedback === 'up'} onClick={() => onFeedback('up')} className={cn('rounded-full p-1.5 text-fg-2 hover:bg-surface', msg.feedback === 'up' && 'bg-primary/15 text-primary')}>
+            <span className="text-[12px] text-fg-2">{t('Nakatulong ba ito?', 'Did this help?')}</span>
+            <button type="button" aria-label={t('Nakatulong', 'Helpful')} aria-pressed={msg.feedback === 'up'} onClick={() => onFeedback('up')} className={cn('rounded-full p-1.5 text-fg-2 hover:bg-surface', msg.feedback === 'up' && 'bg-primary/15 text-primary')}>
               <ThumbsUp size={15} />
             </button>
-            <button type="button" aria-label="Hindi nakatulong" aria-pressed={msg.feedback === 'down'} onClick={() => onFeedback('down')} className={cn('rounded-full p-1.5 text-fg-2 hover:bg-surface', msg.feedback === 'down' && 'bg-primary/15 text-primary')}>
+            <button type="button" aria-label={t('Hindi nakatulong', 'Not helpful')} aria-pressed={msg.feedback === 'down'} onClick={() => onFeedback('down')} className={cn('rounded-full p-1.5 text-fg-2 hover:bg-surface', msg.feedback === 'down' && 'bg-primary/15 text-primary')}>
               <ThumbsDown size={15} />
             </button>
             {msg.feedbackError && <span role="alert" className="text-xs text-danger">{msg.feedbackError}</span>}
