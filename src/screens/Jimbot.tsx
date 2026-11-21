@@ -9,540 +9,15 @@ import { OfflineState } from '@/components/states/States'
 import { Button } from '@/components/ui/Button'
 import { PhaseTag } from '@/components/ui/PhaseTag'
 import { Skeleton } from '@/components/ui/Skeleton'
-import type { ChatBusinessResult, ChatItineraryResult, ChatResult, Msg } from '@/data/chat'
-import { resolveBusinessImage } from '@/biz/db/assets'
+import type { ChatResult, Msg } from '@/data/chat'
 import { cn } from '@/lib/cn'
+import { BudgetSummary, JimbotActions, JimbotMapPreview, PlaceStopCard } from '@/components/jimbot'
+import { TripItineraryCard } from '@/components/jimbot/trip/TripItineraryCard'
+import { ShareSheet, shareOrFallback } from '@/components/ShareSheet'
+import type { JimbotAction } from '@/data/chat'
+import { askJimbot } from '@/lib/jimbotClient'
 import { supabase } from '@/lib/supabase'
 import { useOnline } from '@/lib/useOnline'
-
-// jimbot-intent.ts
-// Intent detection, entity extraction, gibberish detection, and fallback replies for Jimbot.
-// No dependencies. Works in React / React Native / Node.
-
-/* ============================== TYPES ============================== */
-
-export type Intent =
-  | 'greeting'
-  | 'smalltalk'
-  | 'thanks'
-  | 'goodbye'
-  | 'help'
-  | 'itinerary'
-  | 'database_search'
-  | 'budget'
-  | 'transport'
-  | 'packing'
-  | 'safety'
-  | 'weather'
-  | 'fallback_gibberish'
-  | 'fallback_unclear'
-
-export interface Entities {
-  days?: number
-  budget?: number
-  people?: number
-  location?: string
-  vibe?: 'tipid' | 'romantic' | 'pamilya'
-  category?: 'kainan' | 'cafe' | 'resort' | 'pasyalan' | 'negosyo'
-}
-
-export interface IntentResult {
-  intent: Intent
-  confidence: number // 0..1
-  entities: Entities
-  normalized: string
-}
-
-export interface ReplyData {
-  text: string
-  quickReplies?: string[]
-  action?: 'ASK_ITINERARY_DETAILS' | 'SEARCH_DB' | 'OPEN_BUDGET' | 'HANDOFF'
-}
-
-export interface ChatContext {
-  /** consecutive messages Jimbot could not understand */
-  fallbackCount: number
-  slots: Entities
-  lastIntent?: 'itinerary' | 'database_search' | 'budget'
-}
-
-/* ============================ NORMALIZING ========================== */
-
-export function normalize(input: string): string {
-  return input
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // strip accents (á -> a)
-    .replace(/(\d),(?=\d)/g, '$1') // preserve grouped amounts (₱5,000 -> ₱5000)
-    .replace(/[^\p{L}\p{N}\s₱$]/gu, ' ') // drop punctuation/emoji
-    .replace(/(\p{L})\1{2,}/gu, '$1$1') // "kumustaaaa" -> "kumustaa"
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-/* ============================ KEYWORD MAP ========================== */
-// weight: 2 = strong signal, 1 = weak signal. Phrases (with spaces) match via includes.
-
-type Keyword = [word: string, weight: number]
-
-const KEYWORDS: Record<Exclude<Intent, 'fallback_gibberish' | 'fallback_unclear'>, Keyword[]> = {
-  greeting: [
-    ['hi', 2], ['hello', 2], ['hey', 2], ['kumusta', 2], ['kamusta', 2], ['musta', 2],
-    ['good morning', 2], ['good afternoon', 2], ['good evening', 2],
-    ['magandang umaga', 2], ['magandang hapon', 2], ['magandang gabi', 2],
-    ['maayong buntag', 2], ['maayong hapon', 2], ['maayong gabii', 2], ['uy', 1], ['hoy', 1],
-  ],
-  smalltalk: [
-    ['maayo', 2], ['ok', 1], ['okay', 1], ['sige', 1], ['oo', 1], ['opo', 1],
-    ['mabuti', 2], ['ayos', 2], ['sana all', 1], ['wala', 1], ['haha', 1], ['hehe', 1],
-  ],
-  thanks: [['salamat', 2], ['thanks', 2], ['thank you', 2], ['maraming salamat', 2], ['daghang salamat', 2], ['salamat kaayo', 2]],
-  goodbye: [['bye', 2], ['paalam', 2], ['goodbye', 2], ['sige na', 1], ['see you', 2], ['ingat', 1], ['amping', 2]],
-  help: [['help', 2], ['tulong', 2], ['paano', 1], ['makakatulong', 2], ['ano kaya mo', 2], ['anong magagawa mo', 2], ['ano ang magagawa mo', 2]],
-  transport: [['commute', 2], ['transport', 2], ['pamasahe', 2], ['pasahe', 2], ['jeep', 2], ['bus', 2], ['tren', 2], ['train', 2], ['paano pumunta', 2], ['unsaon pag adto', 2], ['how to get', 2]],
-  packing: [['packing', 2], ['dala', 2], ['dalhin', 2], ['dadalhin', 2], ['dad on', 2], ['i-pack', 2], ['pack', 2], ['maleta', 2], ['bag', 2]],
-  safety: [['safe', 2], ['ligtas', 2], ['luwas', 2], ['safety', 2], ['delikado', 2], ['emergency', 2]],
-  weather: [['weather', 2], ['panahon', 2], ['ulan', 2], ['uulan', 2], ['umuulan', 2], ['rain', 2], ['raining', 2], ['forecast', 2], ['temperature', 2], ['init', 2]],
-  itinerary: [
-    ['itinerary', 2], ['itineraryo', 2], ['plano', 2], ['planuhin', 2], ['biyahe', 2],
-    ['byahe', 2], ['trip', 2], ['tour', 1], ['gala', 2], ['laag', 2], ['maglaag', 2], ['lakaw', 2], ['vacation', 2], ['bakasyon', 2],
-    ['schedule', 1], ['iskedyul', 1], ['weekend', 1], ['overnight', 1], ['staycation', 2], ['getaway', 2], ['day trip', 2], ['travel plan', 2],
-  ],
-  database_search: [
-    ['kainan', 2], ['kan anan', 2], ['restaurant', 2], ['restawran', 2], ['carinderia', 2], ['eatery', 2], ['dining', 2], ['bakery', 2], ['food place', 2], ['negosyo', 2],
-    ['business', 2], ['lugar', 2], ['pasyalan', 2], ['attraction', 2], ['tourist spot', 2], ['things to do', 2], ['museum', 2], ['park', 2], ['resort', 2], ['cafe', 2], ['coffee shop', 2],
-    ['kapihan', 2], ['recommend', 2], ['suhestiyon', 2], ['suggest', 2], ['saan', 1],
-    ['near', 1], ['malapit', 1], ['hotel', 2], ['tindahan', 1], ['pagkain', 1], ['kain', 1],
-    ['masarap', 1], ['beach', 1], ['dagat', 1], ['bundok', 1], ['falls', 1], ['simbahan', 1],
-    ['parking', 1], ['romantic', 1], ['pamilya', 1], ['family', 1], ['cheap', 1], ['budget friendly', 1],
-  ],
-  budget: [
-    ['budget', 2], ['badyet', 2], ['magkano', 2], ['presyo', 2], ['gastos', 2],
-    ['mura', 1], ['tipid', 2], ['barato', 2], ['cost', 1], ['price', 1], ['pamasahe', 1], ['pasahe', 1], ['pera', 1],
-  ],
-}
-
-// Extra words so we don't mistake normal Tagalog/English filler for gibberish.
-const COMMON_WORDS = new Set(
-  ('ako ikaw ka mo ko ang ng sa na at o ay ito iyan iyon yung mga si sina kami tayo kayo sila ' +
-    'gusto ayaw nais pwede puwede pwedeng paki po ba naman lang din rin pa nga daw raw ' +
-    'ano sino saan kailan bakit paano gaano ilan ilang para kay kung pero kasi dahil ' +
-    'the a an i you we is are to for of in on and or can could please want need with ' +
-    'araw gabi umaga hapon linggo buwan taon bukas ngayon kahapon day days night nights people persons tao kami unsa adto dili ta ' +
-    'cebu manila baguio palawan boracay davao bohol iloilo siargao batangas tagaytay').split(' ')
-)
-const KNOWN_LOCATIONS = ['quezon city', 'cebu city', 'intramuros', 'tagaytay', 'batangas', 'siargao', 'boracay', 'palawan', 'baguio', 'manila', 'davao', 'bohol', 'iloilo', 'binondo', 'makati', 'cebu']
-
-const ALL_KNOWN = new Set<string>(COMMON_WORDS)
-for (const list of Object.values(KEYWORDS)) {
-  for (const [w] of list) w.split(' ').forEach((p) => ALL_KNOWN.add(p))
-}
-
-/* ============================ FUZZY MATCH ========================== */
-
-function levenshtein(a: string, b: string, max = 3): number {
-  if (Math.abs(a.length - b.length) > max) return max + 1
-  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)])
-  for (let j = 1; j <= b.length; j++) dp[0][j] = j
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      dp[i][j] = Math.min(
-        dp[i - 1][j] + 1,
-        dp[i][j - 1] + 1,
-        dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
-      )
-    }
-  }
-  return dp[a.length][b.length]
-}
-
-/** allowed typos depends on word length: short words must match exactly */
-function maxTypos(len: number): number {
-  if (len <= 4) return 0
-  if (len <= 7) return 1
-  return 2
-}
-
-function tokenMatchesWord(token: string, word: string): boolean {
-  if (token === word) return true
-  const allowed = maxTypos(word.length)
-  return allowed > 0 && levenshtein(token, word, allowed) <= allowed
-}
-
-function isKnownToken(token: string): boolean {
-  if (ALL_KNOWN.has(token)) return true
-  if (/^\d+$/.test(token)) return true
-  for (const known of ALL_KNOWN) {
-    if (known.length >= 5 && tokenMatchesWord(token, known)) return true
-  }
-  return false
-}
-
-/* ========================== GIBBERISH CHECK ======================== */
-
-const KEYBOARD_ROWS = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm', 'qazwsxedc']
-const VOWELS = new Set('aeiou')
-
-function isKeyboardMash(token: string): boolean {
-  if (token.length < 4) return false
-  for (const row of KEYBOARD_ROWS) {
-    const rev = [...row].reverse().join('')
-    for (let i = 0; i <= token.length - 4; i++) {
-      const chunk = token.slice(i, i + 4)
-      if (row.includes(chunk) || rev.includes(chunk)) return true
-    }
-  }
-  return false
-}
-
-export function isGibberishToken(token: string): boolean {
-  if (/^\d+$/.test(token) || isKnownToken(token)) return false
-  const letters = [...token].filter((c) => /\p{L}/u.test(c))
-  if (letters.length < 4) return false
-
-  const vowelCount = letters.filter((c) => VOWELS.has(c)).length
-  const vowelRatio = vowelCount / letters.length
-  const longConsonantRun = /[bcdfghjklmnpqrstvwxyz]{5,}/.test(token)
-  const unique = new Set(letters).size / letters.length
-
-  if (longConsonantRun) return true // "sfsfds"
-  if (vowelRatio < 0.2 || vowelRatio > 0.8) return true
-  if (isKeyboardMash(token)) return true // "asdf", "qwer"
-  if (letters.length >= 8 && unique < 0.4) return true // "ababababab"
-  // long, unknown, and weird-looking: random letters like "adasfsfdsgedsgesdfd"
-  if (letters.length >= 12 && !isKnownToken(token) && vowelRatio < 0.3) return true
-  return false
-}
-
-export function isGibberish(normalized: string): boolean {
-  if (!normalized) return true
-  if (!/\p{L}/u.test(normalized)) return !/\d/.test(normalized) // only symbols/emoji
-  const tokens = normalized.split(' ')
-  const gibberish = tokens.filter(isGibberishToken).length
-  const known = tokens.filter(isKnownToken).length
-  if (known === 0 && gibberish / tokens.length >= 0.5) return true
-  return gibberish / tokens.length >= 0.7
-}
-
-/* ========================== ENTITY EXTRACTION ====================== */
-
-export function extractEntities(normalized: string): Entities {
-  const entities: Entities = {}
-
-  const days = normalized.match(/(\d{1,2})\s*(araw|days?|day|gabi|nights?)/)
-  if (days) entities.days = Math.min(parseInt(days[1], 10), 30)
-  else if (/weekend/.test(normalized)) entities.days = 2
-
-  const budget = normalized.match(/(?:₱|php|\$|budget(?: ko)?(?: ay| of| is| na)?\s*)\s*(\d+(?:\.\d+)?)\s*(k|thousand)?\b|(\d{3,7})\s*(?:pesos|php|piso)/)
-  const budgetAmount = budget?.[1] ?? budget?.[3]
-  if (budgetAmount) entities.budget = Math.round(parseFloat(budgetAmount) * (budget?.[2] ? 1000 : 1))
-
-  const people = normalized.match(/\b(\d{1,2})\s*(?:tao|katao|people|persons?|pax|adults?|kids|children|travelers?|travellers?|of us)\b/)
-  if (people) entities.people = Math.min(parseInt(people[1], 10), 30)
-  else {
-    const wordPeople = normalized.match(/\b(isa|dalawa|tatlo|apat|lima|anim)\s+(?:kami|tao|katao|people|pax)\b/)
-    if (wordPeople) {
-      entities.people = { isa: 1, dalawa: 2, tatlo: 3, apat: 4, lima: 5, anim: 6 }[wordPeople[1]]
-    }
-  }
-
-  const tokens = normalized.split(' ')
-  const hasCategory = (...words: string[]) => words.some((word) =>
-    word.includes(' ')
-      ? normalized.includes(word)
-      : tokens.some((token) => token === word || (word.length >= 6 && tokenMatchesWord(token, word))),
-  )
-  if (hasCategory('kainan', 'kan anan', 'restaurant', 'restawran', 'carinderia', 'eatery', 'dining', 'bakery', 'food', 'pagkain', 'kain')) entities.category = 'kainan'
-  else if (hasCategory('cafe', 'kapihan', 'coffee')) entities.category = 'cafe'
-  else if (hasCategory('resort', 'hotel', 'beach', 'dagat')) entities.category = 'resort'
-  else if (hasCategory('pasyalan', 'attraction', 'tourist spot', 'things to do', 'museum', 'park', 'falls', 'bundok', 'simbahan')) entities.category = 'pasyalan'
-  else if (hasCategory('negosyo', 'business', 'tindahan')) entities.category = 'negosyo'
-
-  if (/\b(tipid|mura|barato|cheap|budget friendly)\b/.test(normalized)) entities.vibe = 'tipid'
-  else if (/\b(romantic|date|date night|romantiko)\b/.test(normalized)) entities.vibe = 'romantic'
-  else if (/\b(pamilya|family|pambata|bata)\b/.test(normalized)) entities.vibe = 'pamilya'
-
-  const locationMatch = normalized.match(/\b(?:malapit sa|near|around|sa|in)\s+([\p{L}\p{N}]+(?:\s+[\p{L}\p{N}]+){0,2})/u)
-  if (locationMatch) {
-    const locationStopwords = new Set([
-      'ako', 'amin', 'ang', 'at', 'ba', 'budget', 'cafe', 'gusto', 'hotel', 'itinerary', 'kainan', 'kami',
-      'ko', 'lang', 'mga', 'negosyo', 'ng', 'pasyalan', 'please', 'po', 'recommend', 'resort', 'restaurant',
-      'sana', 'tayo', 'the', 'trip', 'weekend', 'naman', 'me', 'nearby', 'ako', 'para', 'for', 'with',
-      'tao', 'katao', 'people', 'pax', 'araw', 'gabi', 'days', 'day',
-    ])
-    const locationParts: string[] = []
-    for (const part of locationMatch[1].split(' ')) {
-      if (locationStopwords.has(part)) break
-      locationParts.push(part)
-    }
-    if (locationParts.length) entities.location = locationParts.join(' ')
-  }
-  if (!entities.location) {
-    const knownLocation = KNOWN_LOCATIONS.find((location) => new RegExp(`\\b${location}\\b`).test(normalized))
-    if (knownLocation) entities.location = knownLocation
-  }
-
-  return entities
-}
-
-/* ============================ CLASSIFIER =========================== */
-
-export function detectIntent(raw: string): IntentResult {
-  const normalized = normalize(raw)
-  const entities = extractEntities(normalized)
-
-  if (isGibberish(normalized)) {
-    return { intent: 'fallback_gibberish', confidence: 0.95, entities, normalized }
-  }
-
-  const tokens = normalized.split(' ')
-  const scores = new Map<Intent, number>()
-
-  for (const [intent, list] of Object.entries(KEYWORDS) as [Intent, Keyword[]][]) {
-    let score = 0
-    for (const [word, weight] of list) {
-      if (word.includes(' ')) {
-        if (normalized.includes(word)) score += weight + 1 // phrases are stronger
-      } else if (tokens.some((t) => tokenMatchesWord(t, word))) {
-        score += weight
-      }
-    }
-    if (score > 0) scores.set(intent, score)
-  }
-
-  // Entity boosts: "3 araw" / "₱5000" imply planning even without keywords
-  if (entities.days) scores.set('itinerary', (scores.get('itinerary') ?? 0) + 2)
-  if (entities.budget) scores.set('budget', (scores.get('budget') ?? 0) + 1)
-  if (entities.category) scores.set('database_search', (scores.get('database_search') ?? 0) + 1)
-
-  const isShortDatabaseLookup =
-    KNOWN_LOCATIONS.includes(normalized) ||
-    (tokens.length <= 2 &&
-      tokens.every((token) => !COMMON_WORDS.has(token) && !isGibberishToken(token)) &&
-      tokens.some((token) => token.length >= 4))
-
-  if (scores.size === 0 && isShortDatabaseLookup) {
-    return { intent: 'database_search', confidence: 0.65, entities, normalized }
-  }
-
-  if (scores.size === 0) {
-    return { intent: 'fallback_unclear', confidence: 0.3, entities, normalized }
-  }
-
-  const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1])
-  const [topIntent, topScore] = ranked[0]
-  const second = ranked[1]?.[1] ?? 0
-  const total = ranked.reduce((s, [, v]) => s + v, 0)
-  const confidence = Math.min(0.99, (topScore / total) * (topScore >= 2 ? 1 : 0.7))
-
-  if (entities.category) return { intent: 'database_search', confidence: 0.9, entities, normalized }
-  if (/\b(weather|panahon|ulan|uulan|umuulan|rain|raining|forecast|temperature|init)\b/.test(normalized)) {
-    return { intent: 'weather', confidence: 0.9, entities, normalized }
-  }
-  if (/\b(safety|safe|ligtas|luwas|delikado|emergency)\b/.test(normalized)) {
-    return { intent: 'safety', confidence: 0.9, entities, normalized }
-  }
-  if (/\b(commute|transport|pamasahe|pasahe|jeep|bus|tren|train|transit)\b|unsaon pag adto/.test(normalized)) {
-    return { intent: 'transport', confidence: 0.9, entities, normalized }
-  }
-  if (/\b(packing|dadalhin|dalhin|dala|pack|maleta)\b|dad on/.test(normalized)) {
-    return { intent: 'packing', confidence: 0.9, entities, normalized }
-  }
-  if (entities.days && !entities.category) return { intent: 'itinerary', confidence: 0.9, entities, normalized }
-  if (!entities.days && /\b(budget|badyet|magkano|presyo|gastos|tipid|mura|barato|price)\b/.test(normalized)) {
-    return { intent: 'budget', confidence: 0.9, entities, normalized }
-  }
-
-  // Greeting + real request ("hi, gusto ko ng itinerary") -> prefer the request
-  if (topIntent === 'greeting' && second > 0) {
-    const real = ranked.find(([i]) => i !== 'greeting')!
-    return { intent: real[0], confidence, entities, normalized }
-  }
-
-  // Weak and ambiguous -> ask again instead of guessing
-  if (topScore < 2 && topScore - second < 1) {
-    return { intent: 'fallback_unclear', confidence, entities, normalized }
-  }
-
-  return { intent: topIntent, confidence, entities, normalized }
-}
-
-/* ============================== REPLIES ============================ */
-
-const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
-
-type LangT = (tl: string, en: string) => string
-/** Intent tests call handleMessage without a language, so Tagalog stays the default. */
-const tlOnly: LangT = (tl) => tl
-
-const menu = (t: LangT) => [
-  t('Gumawa ng itinerary', 'Make an itinerary'),
-  t('Maghanap ng kainan', 'Find restaurants'),
-  t('Maghanap ng pasyalan', 'Find attractions'),
-  t('Mag-budget', 'Set a budget'),
-]
-
-const categoryLabel = (category: NonNullable<Entities['category']>, t: LangT) => {
-  if (category === 'kainan') return t('kainan', 'dining places')
-  if (category === 'cafe') return t('cafe', 'cafes')
-  if (category === 'resort') return t('resort', 'resorts')
-  if (category === 'pasyalan') return t('pasyalan', 'attractions')
-  return t('negosyo', 'businesses')
-}
-
-export function buildReply(result: IntentResult, ctx: ChatContext, t: LangT = tlOnly): ReplyData {
-  const { intent, entities } = result
-
-  switch (intent) {
-    case 'greeting':
-      return {
-        text: pick([
-          t('Kumusta! Ako si Jimbot, ang AI travel buddy mo. Ano ang maitutulong ko sa biyahe mo?', "Hi! I'm Jimbot, your AI travel buddy. How can I help with your trip?"),
-          t('Hello! Handa na akong tumulong sa plano mo. Itinerary, kainan, o pasyalan?', "Hello! I'm ready to help with your plan. Itinerary, dining, or places to visit?"),
-        ]),
-        quickReplies: menu(t),
-      }
-
-    case 'smalltalk':
-      return { text: pick([t('Mabuti naman! Saan mo gustong gumala?', "I'm doing well! Where would you like to go?"), t('Ayos! May plano ka na bang puntahan?', 'Great! Do you have a place in mind?'), t('Nandito lang ako kung kailangan mo ng travel tips o rekomendasyon.', "I'm here if you need travel tips or recommendations.")]), quickReplies: menu(t) }
-
-    case 'thanks':
-      return { text: t('Walang anuman! Sabihin mo lang kung may iba ka pang kailangan.', "You're welcome! Just let me know if you need anything else.") }
-
-    case 'goodbye':
-      return { text: t('Paalam! Ingat sa biyahe, at balik ka lang kay Jimbot kapag may bagong plano. 🐯', 'Goodbye! Have a safe trip, and come back to Jimbot when you have a new plan. 🐯') }
-
-    case 'help':
-      return {
-        text: t('Matutulungan kitang maghanap ng verified na lugar, tumingin ng naka-save na itinerary, magplano ayon sa araw at budget, at magbigay ng pangkalahatang tips sa biyahe.', 'I can help you find verified places, check a saved itinerary, plan by days and budget, and give general travel tips.'),
-        quickReplies: [...menu(t), t('Tips sa commute', 'Commute tips'), t('Tips sa pag-iimpake', 'Packing tips')],
-      }
-
-    case 'itinerary': {
-      if (!entities.days) {
-        return {
-          text: t('Ilang araw ang biyahe mo?', 'How many days is your trip?'),
-          quickReplies: [t('1 araw', '1 day'), t('2 araw', '2 days'), t('3 araw', '3 days'), 'Weekend'],
-        }
-      }
-      if (!entities.location) return { text: t(`Saan mo gustong pumunta para sa ${entities.days}-araw na biyahe?`, `Where would you like to go for the ${entities.days}-day trip?`), quickReplies: ['Baguio', 'Cebu', 'Intramuros'] }
-      return { text: t(`Titingnan ko ang mga naka-save na itinerary sa ${entities.location}. Ang database ay walang haba ng biyahe o bilang ng kasama, kaya hindi ko makukumpirmang tugma ang mga iyon.`, `I'll check the saved itineraries in ${entities.location}. The database does not record trip length or group size, so I can't confirm those match.`), action: 'ASK_ITINERARY_DETAILS' }
-    }
-
-    case 'database_search':
-      if (!entities.category && result.confidence <= 0.7) {
-        return {
-          text: t(`Hahanapin ko ang mga verified na lugar na may kaugnayan sa “${result.normalized}”.`, `I'll look for verified places related to “${result.normalized}”.`),
-          action: 'SEARCH_DB',
-        }
-      }
-      if (!entities.category) return { text: t('Anong uri ng lugar ang hanap mo?', 'What kind of place are you looking for?'), quickReplies: [t('Kainan', 'Restaurant'), 'Cafe', 'Resort', t('Pasyalan', 'Attraction')] }
-      return {
-        text: t(`Hahanapin ko ang mga verified na ${entities.category}${entities.location ? ` sa ${entities.location}` : ' sa database'}.`, `I'll look for verified ${categoryLabel(entities.category, t)}${entities.location ? ` in ${entities.location}` : ' in the database'}.`),
-        action: 'SEARCH_DB',
-      }
-
-    case 'budget':
-      return {
-        text: entities.budget
-          ? pick([
-              t(`Noted, ₱${entities.budget.toLocaleString()} ang budget mo. Buksan natin ang planner para makita ang mga gastos.`, `Noted, your budget is ₱${entities.budget.toLocaleString()}. Let's open the planner to see the costs.`),
-              t(`₱${entities.budget.toLocaleString()} ang ilalaan mo. Nasa Budget planner ang breakdown ng biyahe mo.`, `You've set aside ₱${entities.budget.toLocaleString()}. Your trip breakdown is in the Budget planner.`),
-            ])
-          : t('Magkano ang budget mo? Buksan natin ang planner para maitala ang mga gastos.', "How much is your budget? Let's open the planner to record the costs."),
-        action: 'OPEN_BUDGET',
-      }
-
-    case 'transport':
-      return { text: t('Wala akong live na ruta o pamasahe. I-check ang opisyal na transit app o operator bago bumiyahe, at maglaan ng dagdag na oras para sa transfers at traffic.', "I don't have live routes or fares. Check the official transit app or operator before travelling, and allow extra time for transfers and traffic.") }
-
-    case 'packing':
-      return { text: pick([t('Ihanda ang valid ID, charger, gamot na kailangan mo, at damit ayon sa panahon. I-check ang baggage rules ng sasakyan mo bago bumiyahe.', 'Prepare a valid ID, charger, any medicine you need, and clothes for the weather. Check your carrier’s baggage rules before travelling.'), t('Magdala ng tubig, power bank, kopya ng booking, at komportableng sapatos. Iakma ang damit sa haba at aktibidad ng biyahe.', 'Bring water, a power bank, a copy of your booking, and comfortable shoes. Match your clothes to the trip length and activities.')]) }
-
-    case 'safety':
-      return { text: t('Pangkalahatang paalala: itago nang maayos ang mahahalagang gamit, ipaalam sa kasama ang plano, at gamitin ang opisyal na emergency channels. Wala akong live safety reports para sa mga lugar.', 'General reminder: keep your valuables secure, tell your companions your plan, and use official emergency channels. I do not have live safety reports for places.') }
-
-    case 'weather':
-      return { text: t('Wala akong live na weather forecast. Tingnan ang opisyal na forecast bago umalis; kung ibibigay mo ang lugar, makakatulong akong maghanap ng mga verified na puntahan doon.', "I don't have a live weather forecast. Check the official forecast before leaving; if you tell me the place, I can help find verified spots there.") }
-
-    case 'fallback_gibberish':
-    case 'fallback_unclear':
-      return buildFallback(intent, ctx, t)
-  }
-}
-
-/** Escalating fallback so the bot never repeats the exact same line forever. */
-function buildFallback(intent: 'fallback_gibberish' | 'fallback_unclear', ctx: ChatContext, t: LangT = tlOnly): ReplyData {
-  const level = ctx.fallbackCount // 0 = first miss
-
-  if (level === 0) {
-    return {
-      text:
-        intent === 'fallback_gibberish'
-          ? t('Hmm, hindi ko maintindihan ang mensahe mo. 😅 Pwede mo bang ulitin o piliin ang isa sa baba?', "Hmm, I couldn't understand your message. 😅 Could you repeat it or pick one below?")
-          : t('Pasensya na, hindi ko pa nakuha ang ibig mong sabihin. Ano ang gusto mong malaman?', "Sorry, I didn't quite get what you meant. What would you like to know?"),
-      quickReplies: menu(t),
-    }
-  }
-  if (level === 1) {
-    return {
-      text: t('Pasensya na ulit! Subukan mo ang ganito: "Gumawa ng 3 araw na itinerary sa Baguio" o "Kainan malapit sa Session Road".', 'Sorry again! Try something like "Make a 3-day itinerary in Baguio" or "Restaurants near Session Road".'),
-      quickReplies: menu(t),
-    }
-  }
-  return {
-    text: t('Mukhang nahihirapan akong intindihin ka. Gusto mo bang makausap ang support team namin, o subukan ulit sa mga pagpipilian sa baba?', 'It looks like I am having trouble understanding you. Would you like to talk to our support team, or try again with the options below?'),
-    quickReplies: [...menu(t).slice(0, 2), t('Kausapin ang support', 'Talk to support')],
-    action: 'HANDOFF',
-  }
-}
-
-/* ============================ MAIN ENTRY =========================== */
-
-export function handleMessage(raw: string, ctx: ChatContext, t: LangT = tlOnly): { reply: ReplyData; ctx: ChatContext; result: IntentResult } {
-  let result = detectIntent(raw)
-  if (
-    KNOWN_LOCATIONS.includes(result.normalized) &&
-    (ctx.lastIntent === 'itinerary' || ctx.lastIntent === 'database_search') &&
-    !result.entities.category
-  ) {
-    result = { ...result, intent: ctx.lastIntent, confidence: 0.8 }
-  }
-  const bareAmount = result.normalized.match(/^(\d+(?:\.\d+)?)\s*(k|thousand)?$/)
-  if (result.intent === 'fallback_unclear' && bareAmount && ctx.lastIntent) {
-    const value = Math.round(Number(bareAmount[1]) * (bareAmount[2] ? 1000 : 1))
-    if (ctx.lastIntent === 'itinerary' && !ctx.slots.days && !bareAmount[2] && value >= 1 && value <= 30) {
-      result = { ...result, intent: 'itinerary', confidence: 0.8, entities: { ...result.entities, days: value } }
-    } else if (ctx.lastIntent === 'budget' && !ctx.slots.budget && value >= 100) {
-      result = { ...result, intent: 'budget', confidence: 0.8, entities: { ...result.entities, budget: value } }
-    }
-  }
-  const isFollowUp = /\b(mas mura|mas tipid|mas barato|barato|cheap|budget friendly|yung mas|mas mahal|cheaper|cheapest|lower price|sa .+ naman|may parking|with parking)\b/.test(result.normalized)
-  if (isFollowUp && (ctx.slots.category || ctx.slots.location)) {
-    result = { ...result, intent: 'database_search', confidence: 0.8 }
-  } else if (
-    result.intent === 'fallback_unclear' &&
-    ctx.lastIntent &&
-    Object.keys(result.entities).length > 0
-  ) {
-    result = { ...result, intent: ctx.lastIntent, confidence: 0.8 }
-  }
-  const isFallback = result.intent === 'fallback_gibberish' || result.intent === 'fallback_unclear'
-  const slots = isFallback ? ctx.slots : { ...ctx.slots, ...result.entities }
-  if (/\b(mas mura|mas tipid|mas barato|barato|tipid|cheap|cheaper|cheapest|lower price)\b/.test(result.normalized)) slots.vibe = 'tipid'
-  if (/\b(mas mahal)\b/.test(result.normalized)) slots.vibe = undefined
-  const enrichedResult = { ...result, entities: slots }
-  const reply = buildReply(enrichedResult, { ...ctx, slots }, t)
-  const lastIntent =
-    result.intent === 'itinerary' || result.intent === 'database_search' || result.intent === 'budget'
-      ? result.intent
-      : ctx.lastIntent
-  return {
-    reply,
-    result: enrichedResult,
-    ctx: { fallbackCount: isFallback ? ctx.fallbackCount + 1 : 0, slots, lastIntent },
-  }
-}
 
 /* ============================ CHAT UI ============================== */
 type BotMsg = Extract<Msg, { role: 'bot' }>
@@ -550,164 +25,21 @@ type Conversation = { id: string; updated_at: string; title: string }
 
 const MAX_INPUT = 300
 
+type LangT = (tl: string, en: string) => string
+const tlOnly: LangT = (tl) => tl
+
+const offlineText = (t: LangT) => t('Hindi ako makasagot ngayon. Subukan ulit mamaya.', "I can't answer right now. Try again later.")
+const saveFailText = (t: LangT) => t('Hindi ko ma-save ang itinerary ngayon. Subukan ulit mamaya.', "I couldn't save the itinerary. Try again later.")
+
 const welcomeMessage = (t: LangT = tlOnly): Msg => ({
   id: 'welcome',
   role: 'bot',
   expression: 'waving',
-  text: t('Kumusta! Ako si Jimbot. Maghanap tayo ng lugar, magplano ng biyahe, o tingnan ang budget mo.', "Hi! I'm Jimbot. Let's find a place, plan a trip, or check your budget."),
-  quickReplies: menu(t),
+  text: t('Kumusta! Ako si Jimbot. Tutulungan kitang gumawa ng itinerary at mag-budget ng biyahe mo.', "Hi! I'm Jimbot. I'll help you make an itinerary and budget for your trip."),
+  quickReplies: [t('Gumawa ng itinerary', 'Make an itinerary'), t('Mag-budget', 'Set a budget'), 'Quezon City'],
 })
 
-// Words that carry no search meaning, so they don't cause false matches in the businesses table.
-const SEARCH_STOPWORDS = new Set(
-  ('ang ng sa na at ay mga ko mo gusto ako ikaw po ba naman lang para kay kung ito yung ' +
-    'saan ano pwede puwede paki maghanap hanap hanapin recommend suggest suhestiyon ' +
-    'lugar kainan kan anan restaurant negosyo business pasyalan resort cafe kapihan malapit near the a an i for of in food dining eatery bakery tourist spot things to do attraction museum park ' +
-    'gusto ko sana maghanap hanapin please show find mura tipid barato cheap budget friendly family romantic pamilya mas mahal naman yung with may parking').split(' ')
-)
-
-type BusinessRow = {
-  id: string
-  name: string
-  about: string | null
-  city: string | null
-  address: string | null
-  business_type: string | null
-  price_range: string | null
-  specialties: string[] | null
-  cover_url: string | null
-  logo_url: string | null
-  verification_status: string
-}
-
-const CATEGORY_FILTERS: Record<NonNullable<Entities['category']>, string[]> = {
-  kainan: ['food', 'restaurant', 'kainan', 'carinderia', 'eatery', 'bakery'],
-  cafe: ['cafe', 'coffee', 'kapihan'],
-  resort: ['resort', 'hotel', 'beach'],
-  pasyalan: ['attraction', 'tour', 'museum', 'park', 'pasyalan'],
-  negosyo: [],
-}
-
-function safeFilterTerm(value: string) {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}-]/gu, '')
-}
-
-function safeCityFilter(value: string) {
-  return value.replace(/[%,_*()]/g, '').trim()
-}
-
-async function findBusinesses(entities: Entities, normalized: string, widenLocation = false, relaxPrice = false, relaxVibe = false): Promise<ChatBusinessResult[]> {
-  let query = supabase
-    .from('businesses')
-    .select('id, name, about, city, address, business_type, price_range, specialties, cover_url, logo_url, verification_status')
-    .eq('live', true)
-    .eq('verification_status', 'verified')
-    .order('id')
-
-  if (entities.location && !widenLocation) query = query.ilike('city', `%${safeCityFilter(entities.location)}%`)
-  if (entities.category) {
-    const types = CATEGORY_FILTERS[entities.category]
-    if (types.length) query = query.or(types.map((type) => `business_type.ilike.%${type}%`).join(','))
-  }
-  if (entities.vibe === 'tipid' && !relaxPrice) query = query.eq('price_range', '₱')
-  if (!relaxVibe && entities.vibe === 'romantic') query = query.or('about.ilike.%romantic%,about.ilike.%date%,specialties.cs.{romantic},specialties.cs.{date}')
-  if (!relaxVibe && entities.vibe === 'pamilya') query = query.or('about.ilike.%family%,about.ilike.%pamilya%,specialties.cs.{family},specialties.cs.{pamilya}')
-
-  const locationWords = new Set((entities.location ?? '').split(' '))
-  const categoryWords = new Set([
-    ...(entities.category ? [entities.category, ...CATEGORY_FILTERS[entities.category]] : []),
-    ...(entities.category === 'kainan' ? ['kan', 'anan', 'carinderia', 'eatery', 'food', 'dining', 'bakery'] : []),
-    ...(entities.category === 'cafe' ? ['kapihan', 'coffee'] : []),
-    ...(entities.category === 'resort' ? ['hotel', 'beach', 'dagat'] : []),
-    ...(entities.category === 'pasyalan' ? ['attraction', 'tourist spot', 'museum', 'park', 'falls', 'bundok', 'simbahan'] : []),
-  ])
-  const terms = normalized
-    .split(' ')
-    .filter(
-      (term) =>
-        term.length > 2 &&
-        !SEARCH_STOPWORDS.has(term) &&
-        !locationWords.has(term) &&
-        ![...categoryWords].some((category) => tokenMatchesWord(term, category)),
-    )
-    .map(safeFilterTerm)
-    .filter(Boolean)
-  const uniqueTerms = [...new Set(terms)].slice(0, 3)
-  if (widenLocation && !entities.category && !uniqueTerms.length) return []
-  const searchConditions = uniqueTerms.flatMap((term) => [
-    `name.ilike.%${term}%`,
-    `about.ilike.%${term}%`,
-    `business_type.ilike.%${term}%`,
-    `city.ilike.%${term}%`,
-    `address.ilike.%${term}%`,
-    `specialties.cs.{${term}}`,
-  ])
-  if (searchConditions.length) {
-    query = query.or(searchConditions.join(','))
-  }
-
-  const data: BusinessRow[] = []
-  const pageSize = 100
-  for (let from = 0; ; from += pageSize) {
-    const { data: page, error } = await query.range(from, from + pageSize - 1)
-    if (error) throw error
-    const rows = (page ?? []) as BusinessRow[]
-    data.push(...rows)
-    if (rows.length < pageSize) break
-  }
-
-  const businesses = await Promise.all(
-    data.map(async (business) => {
-      let photo: string | null = null
-      for (const path of [business.cover_url, business.logo_url]) {
-        if (!path) continue
-        try {
-          photo = await resolveBusinessImage(path)
-          break
-        } catch (imageError) {
-          console.error(`Business image could not be loaded for ${business.id}.`, imageError)
-        }
-      }
-
-      return {
-        kind: 'business' as const,
-        id: business.id,
-        name: business.name,
-        city: business.city,
-        address: business.address,
-        type: business.business_type,
-        priceRange: business.price_range,
-        photo,
-        verified: business.verification_status === 'verified',
-      }
-    }),
-  )
-
-  return businesses.sort((a, b) => {
-    const location = entities.location?.toLowerCase() ?? ''
-    const aExactCity = Number(a.city?.toLowerCase() === location)
-    const bExactCity = Number(b.city?.toLowerCase() === location)
-    const aType = Number(!!entities.category && a.type?.toLowerCase().includes(entities.category))
-    const bType = Number(!!entities.category && b.type?.toLowerCase().includes(entities.category))
-    return bExactCity - aExactCity || bType - aType || Number(b.verified) - Number(a.verified) || a.name.localeCompare(b.name)
-  })
-}
-
-async function findItineraries(entities: Entities): Promise<ChatItineraryResult[]> {
-  let query = supabase
-    .from('itineraries')
-    .select('id, title, subtitle, area, budget')
-    .eq('is_saved', true)
-    .order('updated_at', { ascending: false })
-    .limit(20)
-
-  if (entities.location) query = query.ilike('area', `%${safeFilterTerm(entities.location)}%`)
-  if (entities.budget) query = query.lte('budget', entities.budget)
-
-  const { data, error } = await query
-  if (error) throw error
-  return (data ?? []).map((itinerary) => ({ kind: 'itinerary', ...itinerary, budget: Number(itinerary.budget) }))
-}
+const STRUCTURED_KEYS = ['places', 'itineraryDraft', 'budget', 'map', 'actions', 'warnings', 'refusal', 'quickReplies'] as const
 
 export function JimbotScreen() {
   return <JimbotChat />
@@ -726,7 +58,6 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
   const [conversationError, setConversationError] = useState(false)
   const [switchingConversation, setSwitchingConversation] = useState(false)
   const conversationId = useRef<string | undefined>(undefined)
-  const chatCtx = useRef<ChatContext>({ fallbackCount: 0, slots: {} })
   const listRef = useRef<HTMLDivElement>(null)
   const online = useOnline()
   const navigate = useNavigate()
@@ -806,7 +137,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
     setSwitchingConversation(true)
     const { data, error } = await supabase
       .from('jimbot_messages')
-      .select('id, role, content, intent')
+      .select('id, role, content, intent, payload')
       .eq('conversation_id', id)
       .order('created_at', { ascending: true })
     if (error) {
@@ -817,24 +148,30 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
     }
     if (!isActive()) return
     const restored: Msg[] = [welcomeMessage(t)]
-    chatCtx.current = { fallbackCount: 0, slots: {} }
     for (const message of data ?? []) {
       if (message.intent?.startsWith('feedback_')) continue
       if (message.role === 'user') {
         restored.push({ id: message.id, role: 'user', text: message.content })
-        chatCtx.current = handleMessage(message.content, chatCtx.current, t).ctx
       } else {
-        restored.push({ id: message.id, role: 'bot', expression: 'idea', text: message.content })
+        const bot: Record<string, unknown> = { id: message.id, role: 'bot', expression: 'idea', text: message.content }
+        const payload = (message as { payload?: unknown }).payload
+        if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+          const p = payload as Record<string, unknown>
+          for (const key of STRUCTURED_KEYS) if (p[key] != null) bot[key] = p[key]
+          if (bot.refusal) bot.expression = 'unsure'
+        }
+        restored.push(bot as BotMsg)
       }
     }
     conversationId.current = id
+    planningRef.current = null
     setMessages(restored)
     setConversationError(false)
     setSwitchingConversation(false)
     setHistoryOpen(false)
   }
 
-  const saveMessage = async (role: 'user' | 'bot', content: string, intent: string) => {
+  const saveMessage = async (role: 'user' | 'bot', content: string, intent: string, payload?: Record<string, unknown> | null) => {
     const { data: auth } = await supabase.auth.getUser()
     if (!auth.user) return false
     let createdConversation = false
@@ -846,13 +183,10 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
     }
     const id = conversationId.current
     if (!id) throw new Error(t('Hindi nagawa ang pag-uusap ni Jimbot.', "Couldn't create the Jimbot conversation."))
-    const { error } = await supabase.from('jimbot_messages').insert({
-      conversation_id: id,
-      user_id: auth.user.id,
-      role,
-      intent,
-      content,
-    })
+    const row = { conversation_id: id, user_id: auth.user.id, role, intent, content }
+    let { error } = await supabase.from('jimbot_messages').insert((payload ? { ...row, payload } : row) as typeof row)
+    // Best-effort: payload column may not exist yet; retry without it.
+    if (error && payload) ({ error } = await supabase.from('jimbot_messages').insert(row))
     if (error) throw error
     const updatedAt = new Date().toISOString()
     const { error: updateError } = await supabase.from('jimbot_conversations').update({ updated_at: updatedAt }).eq('id', id)
@@ -869,108 +203,83 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
     return true
   }
 
-  const send = async (text: string) => {
+  // Last AI plan payload so confirm-save can re-verify business IDs server-side.
+  const planningRef = useRef<Record<string, unknown> | null>(null)
+  const pendingShare = useRef(false)
+  const [share, setShare] = useState<{ title: string } | null>(null)
+  const [savedIds, setSavedIds] = useState<Record<string, string>>({})
+
+  const send = async (text: string, opts: { explicitConfirmed?: boolean } = {}) => {
     const clean = text.trim().slice(0, MAX_INPUT)
     if (!clean || thinking) return
 
-    // 1. Classify (handles typos, gibberish, entities) and update the fallback counter.
-    const { reply, ctx, result } = handleMessage(clean, chatCtx.current, t)
-    chatCtx.current = ctx
-    const intent = result.intent
-    const isFallback = intent === 'fallback_gibberish' || intent === 'fallback_unclear'
+    const userMsg: Msg = { id: `u${Date.now()}`, role: 'user', text: clean }
+    // History includes the current user turn.
+    const recent = [...messages.filter((m) => m.id !== 'welcome'), userMsg].slice(-8)
 
-    const pushBot = async (replyText: string, expression: BotMsg['expression'], quickReplies?: string[], results?: ChatResult[]) => {
-      setMessages((m) => [...m, { id: `b${Date.now()}`, role: 'bot', expression, text: replyText, quickReplies, results }])
-      await saveMessage('bot', replyText, intent)
-    }
-
-    // 2. Show the user's message immediately.
-    setMessages((m) => [...m, { id: `u${Date.now()}`, role: 'user', text: clean }])
+    setMessages((m) => [...m, userMsg])
     setInput('')
     setThinking(true)
 
-    try {
-      await saveMessage('user', clean, intent)
-
-      // 3. Intents that don't need the database, and slot-filling turns, use the reply directly.
-      if ((intent !== 'itinerary' && intent !== 'database_search') || !reply.action) {
-        if (reply.action === 'OPEN_BUDGET') setBudgetOpen(true)
-        // TODO: handle reply.action === 'HANDOFF' (open your support screen) and drop this filter.
-        const quick = reply.quickReplies?.filter((q) => q !== t('Kausapin ang support', 'Talk to support'))
-        await pushBot(reply.text, intent === 'greeting' ? 'waving' : isFallback ? 'unsure' : 'idea', quick)
-        return
-      }
-
-      // 4. Saved itineraries
-      if (intent === 'itinerary') {
-        const itineraries = await findItineraries(result.entities)
-        const replyText = itineraries.length
-          ? t(`May ${itineraries.length} naka-save na itinerary sa ${result.entities.location}. Hindi naka-record ang haba ng biyahe o bilang ng kasama, kaya hindi ko makukumpirmang tugma ang mga iyon.`, `There are ${itineraries.length} saved itineraries in ${result.entities.location}. Trip length and group size are not recorded, so I can't confirm those match.`)
-          : t(`Wala akong nakitang naka-save na itinerary sa ${result.entities.location}${result.entities.budget ? ` na pasok sa ₱${result.entities.budget.toLocaleString()} budget` : ''}. Maaari kang mag-browse ng verified na lugar para buuin ang biyahe.`, `I couldn't find a saved itinerary in ${result.entities.location}${result.entities.budget ? ` within your ₱${result.entities.budget.toLocaleString()} budget` : ''}. You can browse verified places to build a trip.`)
-        await pushBot(replyText, itineraries.length ? 'idea' : 'unsure', undefined, itineraries)
-        return
-      }
-
-      // 5. Business search (kainan, cafe, resort, ...)
-      let matches = await findBusinesses(result.entities, result.normalized)
-      let broadenedPrice = false
-      let broadenedLocation = false
-      let broadenedVibe = false
-      if (!matches.length && result.entities.vibe === 'tipid') {
-        matches = await findBusinesses(result.entities, result.normalized, false, true)
-        broadenedPrice = matches.length > 0
-      }
-      if (!matches.length && result.entities.location) {
-        matches = await findBusinesses(result.entities, result.normalized, true, true)
-        broadenedLocation = matches.length > 0
-      }
-      if (!matches.length && result.entities.vibe && result.entities.vibe !== 'tipid') {
-        matches = await findBusinesses(result.entities, result.normalized, false, true, true)
-        broadenedVibe = matches.length > 0
-      }
-      if (!matches.length && result.entities.location && result.entities.vibe && result.entities.vibe !== 'tipid') {
-        matches = await findBusinesses(result.entities, result.normalized, true, true, true)
-        broadenedLocation = matches.length > 0
-        broadenedVibe = matches.length > 0
-      }
-
-      const locationLabel = result.entities.location ? ` sa ${result.entities.location}` : ''
-      const locationLabelEn = result.entities.location ? ` in ${result.entities.location}` : ''
-      const vibe = result.entities.vibe
-        ? result.entities.vibe === 'tipid'
-          ? t('tipid', 'budget')
-          : result.entities.vibe === 'pamilya'
-            ? t('pamilya', 'family')
-            : 'romantic'
-        : ''
-      const intro = matches.length
-        ? broadenedLocation
-          ? t(`Wala akong nahanap sa ${result.entities.location}, kaya pinalawak ko ang paghahanap sa iba pang verified na lugar.`, `I couldn't find anything in ${result.entities.location}, so I widened the search to other verified places.`)
-          : broadenedVibe
-            ? t(`Wala akong nahanap na lugar na may ${vibe} tag${locationLabel}; narito ang iba pang verified na tugma.`, `I couldn't find a place with a ${vibe} vibe${locationLabelEn}; here are other verified matches.`)
-            : broadenedPrice
-              ? t(`Walang pasok sa price tier na ₱. Pinalawak ko ang presyo para makakita ka ng iba pang verified na lugar${locationLabel}.`, `Nothing matched the ₱ price tier. I widened the price range so you can see other verified places${locationLabelEn}.`)
-              : result.entities.category
-                ? t(`Narito ang mga verified na ${result.entities.category}${locationLabel}.`, `Here are verified ${categoryLabel(result.entities.category, t)}${locationLabelEn}.`)
-                : t(`Narito ang mga verified na negosyong may kaugnayan sa “${clean}”.`, `Here are verified businesses related to “${clean}”.`)
-        : result.entities.category
-          ? t(`Wala akong nahanap na verified na ${result.entities.category}${locationLabel}. Subukan ang ibang lugar o kategorya.`, `I couldn't find verified ${categoryLabel(result.entities.category, t)}${locationLabelEn}. Try another place or category.`)
-          : t(`Wala akong nahanap na verified na negosyong tugma sa “${clean}”. Subukan ang ibang salita o lugar.`, `I couldn't find a verified business matching “${clean}”. Try different words or a different place.`)
-      const groundedIntro = result.entities.budget && intent === 'database_search'
-        ? t(`${intro} May price tier lang ang business records, hindi eksaktong presyo bawat tao; hindi ko masisiguro kung pasok sa ₱${result.entities.budget.toLocaleString()}.`, `${intro} Business records only have a price tier, not exact per-person prices, so I can't be sure it fits ₱${result.entities.budget.toLocaleString()}.`)
-        : result.entities.people && intent === 'database_search'
-          ? t(`${intro} Naitala ko ang ${result.entities.people} na kasama, pero wala sa business records ang presyo bawat tao.`, `${intro} I noted your group of ${result.entities.people}, but business records do not include per-person prices.`)
-          : intro
-      await pushBot(groundedIntro, matches.length ? 'idea' : 'unsure', matches.length ? [t('Sa Baguio naman', 'Baguio instead'), t('Sa Cebu naman', 'Cebu instead'), t('Sa Intramuros naman', 'Intramuros instead')] : ['Baguio', 'Cebu', 'Intramuros'], matches)
-    } catch (error) {
-      console.error('Jimbot database request failed', error)
-      const replyText = t('Hindi ko ma-access ang database ngayon. Subukan ulit mamaya.', "I can't access the database right now. Try again later.")
+    const pushOffline = (replyText: string) =>
       setMessages((m) => [...m, { id: `b${Date.now()}`, role: 'bot', expression: 'unsure', text: replyText }])
-      try {
-        await saveMessage('bot', replyText, intent)
-      } catch {
-        // The original database error is already surfaced in the response.
+
+    try {
+      await saveMessage('user', clean, 'user')
+
+      if (!online) {
+        pushOffline(offlineText(t))
+        return
       }
+
+      const ai = await askJimbot({
+        message: clean,
+        conversationId: conversationId.current ?? null,
+        planningContext: planningRef.current,
+        explicitConfirmed: opts.explicitConfirmed,
+        history: recent.map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text })),
+      })
+
+      if (ai.ok) {
+        planningRef.current = {
+          itineraryDraft: ai.bot.itineraryDraft ?? null,
+          places: ai.bot.places ?? [],
+          map: ai.bot.map ?? null,
+          budget: ai.bot.budget ?? null,
+        }
+        const botId = `b${Date.now()}`
+        const intent = ai.bot.refusal
+          ? 'refuse'
+          : opts.explicitConfirmed
+            ? 'save'
+            : ai.bot.itineraryDraft
+              ? 'plan'
+              : 'clarify'
+        const outcome = ai.bot.refusal ? 'refusal' : ai.bot.itineraryDraft ? 'cards' : 'clarify'
+        setMessages((m) => [...m, { id: botId, role: 'bot', expression: ai.bot.refusal ? 'unsure' : 'idea', ...ai.bot }])
+        await saveMessage('bot', ai.bot.text, intent, { ...(ai.payload ?? {}), outcome })
+        if (ai.savedItineraryId) {
+          setSavedIds((cur) => ({ ...cur, [botId]: ai.savedItineraryId! }))
+          if (pendingShare.current) {
+            pendingShare.current = false
+            setShare({ title: ai.bot.itineraryDraft?.title ?? 'Itinerary' })
+          } else {
+            navigate(`/itinerary/${ai.savedItineraryId}`)
+          }
+        } else if (opts.explicitConfirmed) {
+          // Server returned a chat reply without an id (auth/draft error). Keep user on chat.
+          pendingShare.current = false
+        }
+        return
+      }
+
+      const failText = opts.explicitConfirmed ? saveFailText(t) : offlineText(t)
+      pushOffline(failText)
+      pendingShare.current = false
+      await saveMessage('bot', failText, 'offline')
+    } catch (error) {
+      console.error('Jimbot request failed', error)
+      pushOffline(offlineText(t))
     } finally {
       setThinking(false)
     }
@@ -996,7 +305,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
   const startNewConversation = () => {
     if (thinking || switchingConversation) return
     conversationId.current = undefined
-    chatCtx.current = { fallbackCount: 0, slots: {} }
+    planningRef.current = null
     setMessages([welcomeMessage(t)])
     setInput('')
     setConversationError(false)
@@ -1023,13 +332,13 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
             <h1 className="flex items-center gap-2 text-h2">
               Jimbot <PhaseTag phase="MVP" />
             </h1>
-            <p className="text-caption text-fg-2">{thinking ? t('Nag-iisip…', 'Thinking…') : online ? t('AI travel buddy mo · Tagalog / Bisaya / English', 'Your AI travel buddy · Tagalog / Bisaya / English') : t('Offline', 'Offline')}</p>
+            <p className="text-caption text-fg-2">{online ? t('AI travel buddy mo · itinerary at budget', 'Your AI travel buddy · itinerary and budget') : t('Offline', 'Offline')}</p>
           </div>
-          <Button size="sm" variant="secondary" icon={<Plus size={16} />} onClick={startNewConversation} disabled={thinking || switchingConversation || historyLoading}>
-            {t('Bago', 'New')}
+          <Button size="sm" variant="secondary" icon={<Plus size={16} />} onClick={startNewConversation} disabled={thinking || switchingConversation || historyLoading} aria-label={t('Bago', 'New')}>
+            <span className="hidden sm:inline">{t('Bago', 'New')}</span>
           </Button>
-          <Button size="sm" variant="secondary" icon={<PiggyBank size={16} />} onClick={() => setBudgetOpen(true)}>
-            Budget
+          <Button size="sm" variant="secondary" icon={<PiggyBank size={16} />} onClick={() => setBudgetOpen(true)} aria-label="Budget">
+            <span className="hidden sm:inline">Budget</span>
           </Button>
         </div>
       </header>
@@ -1093,7 +402,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
               ) : (
                 <>
                   {conversationError && <p role="alert" className="text-center text-sm text-danger">{t('Hindi ma-load ang usapan. Subukan itong buksan ulit.', "Couldn't load the conversation. Try opening it again.")}</p>}
-                  <p className="text-center text-caption text-fg-2">{t('Ngayon · Tagalog, Bisaya, at English', 'Today · Tagalog, Bisaya, and English')}</p>
+                  <p className="text-center text-caption text-fg-2">{t('Ngayon', 'Today')}</p>
                   {messages.map((m) =>
                     m.role === 'user' ? (
                       <UserBubble key={m.id} text={m.text} />
@@ -1104,6 +413,30 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
                         showQuickReplies={m.id === lastBotId && !thinking}
                         onPick={send}
                         onFeedback={(value) => sendFeedback(m.id, value)}
+                        onOpenBusiness={(id) => navigate(`/shop/${id}`)}
+                        onRefine={(text) => void send(text)}
+                        onShare={(m) => {
+                          if (m.role !== 'bot') return
+                          const id = savedIds[m.id]
+                          if (id) {
+                            shareOrFallback({ title: m.itineraryDraft?.title ?? 'Itinerary', text: m.text, url: `${location.origin}/itinerary/${id}` }, () =>
+                              setShare({ title: m.itineraryDraft?.title ?? 'Itinerary' }),
+                            )
+                            return
+                          }
+                          pendingShare.current = true
+                          void send(t('Sige, i-save mo na ang itinerary.', 'Yes, save the itinerary.'), { explicitConfirmed: true })
+                        }}
+                        savedId={savedIds[m.id]}
+                        onAction={(a) => {
+                          if (a.type === 'confirm_save') void send(t('Sige, i-save mo na ang itinerary.', 'Yes, save the itinerary.'), { explicitConfirmed: true })
+                          else if (a.type === 'revise_cheaper') void send(t('Pwede bang mas mura ang version nito?', 'Can you make a cheaper version?'))
+                          else if (a.type === 'open_business' && a.businessId) navigate(`/shop/${a.businessId}`)
+                          else if (a.type === 'open_help') navigate('/account/help')
+                          else if (a.type === 'open_map') {
+                            // Handled inside BotReply (scroll + highlight map preview).
+                          }
+                        }}
                         onOpenResult={(result) => navigate(result.kind === 'business' ? `/shop/${result.id}` : `/itinerary/${result.id}`)}
                       />
                     )
@@ -1148,6 +481,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
         </section>
       </div>
       <BudgetSheet open={budgetOpen} onClose={() => setBudgetOpen(false)} />
+      <ShareSheet open={!!share} onClose={() => setShare(null)} title={share?.title ?? 'Itinerary'} />
     </main>
   )
 }
@@ -1181,20 +515,52 @@ function BotReply({
   onPick,
   onFeedback,
   onOpenResult,
+  onOpenBusiness,
+  onAction,
+  onRefine,
+  onShare,
+  savedId,
 }: {
+  onOpenBusiness: (id: string) => void
+  onAction: (a: JimbotAction) => void
+  onRefine: (text: string) => void
+  onShare: (msg: BotMsg) => void
+  savedId?: string
   msg: BotMsg
   showQuickReplies: boolean
   onPick: (text: string) => void
   onFeedback: (value: 'up' | 'down') => void
   onOpenResult: (result: ChatResult) => void
 }) {
-  const big = msg.expression === 'unsure'
+  const navigate = useNavigate()
   const t = useT()
+  const big = msg.expression === 'unsure'
   const resultsTrackRef = useRef<HTMLDivElement>(null)
+  const mapRef = useRef<HTMLElement>(null)
+  const cardRef = useRef<HTMLDivElement>(null)
+  const [mapHighlight, setMapHighlight] = useState(false)
+  const [focusMapToken, setFocusMapToken] = useState(0)
   const hasCarousel = (msg.results?.length ?? 0) > 3
   const scrollResults = (direction: -1 | 1) => {
     const track = resultsTrackRef.current
     if (track) track.scrollBy({ left: direction * track.clientWidth * 0.8, behavior: 'smooth' })
+  }
+  const focusMap = () => {
+    if (msg.itineraryDraft?.days?.length) {
+      setFocusMapToken((n) => n + 1)
+      cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      return
+    }
+    mapRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    setMapHighlight(true)
+    window.setTimeout(() => setMapHighlight(false), 1400)
+  }
+  const handleAction = (a: JimbotAction) => {
+    if (a.type === 'open_map') {
+      focusMap()
+      return
+    }
+    onAction(a)
   }
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex items-start gap-2">
@@ -1208,6 +574,39 @@ function BotReply({
           {big && <p className="mb-1 font-display text-[15px] font-semibold text-caution">{t('Hindi ako sigurado', "I'm not sure")}</p>}
           <p className="text-[16px] leading-6">{msg.text}</p>
         </div>
+        {msg.itineraryDraft?.days?.length ? (
+          <div ref={cardRef}>
+            <TripItineraryCard
+              draft={msg.itineraryDraft}
+              budget={msg.budget}
+              places={msg.places}
+              warnings={msg.warnings}
+              saved={Boolean(savedId)}
+              focusMapToken={focusMapToken || undefined}
+              onOpenBusiness={onOpenBusiness}
+              onSave={() => onAction({ type: 'confirm_save', label: t('I-save', 'Save'), businessId: null })}
+              onShare={() => onShare(msg)}
+              onRefine={(text) => onRefine(text)}
+            />
+          </div>
+        ) : (
+          <>
+            {msg.places?.map((p) => <PlaceStopCard key={p.businessId} {...p} note={p.reason} onOpen={onOpenBusiness} />)}
+            {msg.budget && <BudgetSummary budget={msg.budget} />}
+            {msg.map?.businessIds?.length ? (
+              <JimbotMapPreview ref={mapRef} map={msg.map} highlight={mapHighlight} onOpenBusiness={onOpenBusiness} />
+            ) : null}
+          </>
+        )}
+        {msg.refusal && (
+          <button type="button" onClick={() => navigate('/account/help')} className="text-sm font-medium text-link">
+            {t('Kailangan ng tao?', 'Need a human?')}
+          </button>
+        )}
+        {msg.warnings?.map((w, i) => (
+          <p key={i} className="rounded-xl bg-caution/10 px-3 py-2 text-xs text-fg-2">{w}</p>
+        ))}
+        {msg.actions && showQuickReplies && <JimbotActions actions={msg.actions} onAction={handleAction} />}
         {msg.results && msg.results.length > 0 && (
           <div className="space-y-2">
             {hasCarousel && (

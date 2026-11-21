@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#190f0c">
+  <meta name="description" content="Design-reference prototype for a conversational travel itinerary.">
+  <title>Travel Buddy · Itinerary UI Reference</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <svg class="svg-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="pin" viewBox="0 0 24 24"><path d="M20 10c0 5.7-8 12-8 12S4 15.7 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.6"/></symbol>
+    <symbol id="calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 2v6m10-6v6M3 10h18"/></symbol>
+    <symbol id="coins" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></symbol>
+    <symbol id="coffee" viewBox="0 0 24 24"><path d="M4 7h14v9a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V7ZM18 9h1a3 3 0 0 1 0 6h-1M8 3v2m5-2v2"/></symbol>
+    <symbol id="food" viewBox="0 0 24 24"><path d="M4 2v8c0 2 2 3 4 3s4-1 4-3V2M8 2v20m11-20c-3 4-3 9 0 11v9m-3-20v6"/></symbol>
+    <symbol id="leaf" viewBox="0 0 24 24"><path d="M20 4C9 4 4 8 4 15a5 5 0 0 0 5 5c7 0 11-5 11-16ZM3 21c4-6 8-9 14-13"/></symbol>
+    <symbol id="moon" viewBox="0 0 24 24"><path d="M20 16A9 9 0 0 1 8 4a9 9 0 1 0 12 12Z"/><path d="m18 3 .5 1.5L20 5l-1.5.5L18 7l-.5-1.5L16 5l1.5-.5L18 3Z"/></symbol>
+    <symbol id="car" viewBox="0 0 24 24"><path d="m5 16-1 3m15-3 1 3M5 16H4a2 2 0 0 1-2-2v-2l3-7h14l3 7v2a2 2 0 0 1-2 2H5Zm-2-4h18M7 13h2m6 0h2"/></symbol>
+    <symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></symbol>
+    <symbol id="bookmark" viewBox="0 0 24 24"><path d="M5 3h14v18l-7-5-7 5V3Z"/></symbol>
+    <symbol id="tune" viewBox="0 0 24 24"><path d="M3 7h18M3 17h18"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></symbol>
+    <symbol id="share" viewBox="0 0 24 24"><path d="M12 16V3m0 0L7 8m5-5 5 5M4 13v7h16v-7"/></symbol>
+    <symbol id="chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="overview" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="x" viewBox="0 0 24 24"><path d="m5 5 14 14M19 5 5 19"/></symbol>
+    <symbol id="spark" viewBox="0 0 24 24"><path d="m12 2 2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5L12 2Z"/></symbol>
+    <symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></symbol>
+  </svg>
+
+  <main class="shell" id="main-content">
+    <div class="user-message"><span class="user-chip">Quezon City</span></div>
+    <div class="assistant-message">
+      <img class="mascot" src="assets/mascot.webp" width="42" height="42" alt="Travel Buddy">
+      <p class="assistant-copy">Nagawa ko na ang 1-day plan mo sa Quezon City. Pasok sa budget mo, at madaling sundan. <span class="inline-spark">✦</span></p>
+    </div>
+
+    <section class="trip-hero" aria-label="Quezon City trip summary">
+      <div class="hero-photo" aria-hidden="true"></div>
+      <div class="hero-content">
+        <p class="overline"><svg class="icon"><use href="#pin"/></svg> Your travel plan</p>
+        <h1>Quezon City</h1>
+        <div class="hero-details"><span><svg class="icon"><use href="#calendar"/></svg> 1 day</span><span class="hero-divider" aria-hidden="true"></span><span><svg class="icon"><use href="#coins"/></svg> ₱1,500 budget</span></div>
+        <p class="hero-description">Good coffee, a laid-back lunch, some fresh air, and a little of the city after dark.</p>
+        <div class="hero-tags"><span><svg class="icon"><use href="#coffee"/></svg> Kapehan</span><span><svg class="icon"><use href="#food"/></svg> Kainan</span><span><svg class="icon"><use href="#leaf"/></svg> Pasyalan</span></div>
+      </div>
+    </section>
+
+    <section class="journey-panel" aria-label="Itinerary views">
+      <div class="switcher" role="tablist" aria-label="Trip views">
+        <button id="tab-overview" class="segment" type="button" role="tab" aria-selected="false" aria-controls="view-overview" data-view="overview"><svg class="icon"><use href="#overview"/></svg> Overview</button>
+        <button id="tab-day" class="segment" type="button" role="tab" aria-selected="true" aria-controls="view-day" data-view="day"><svg class="icon"><use href="#calendar"/></svg> Day 1</button>
+        <button id="tab-map" class="segment" type="button" role="tab" aria-selected="false" aria-controls="view-map" data-view="map"><svg class="icon"><use href="#pin"/></svg> Map</button>
+      </div>
+      <section id="view-day" class="view active" role="tabpanel" aria-labelledby="tab-day">
+        <nav class="route" aria-label="Tap a stop in route order"><div class="route-items" id="route-items"></div></nav>
+      </section>
+      <section id="view-overview" class="view view-alternate" role="tabpanel" aria-labelledby="tab-overview" hidden>
+        <h2>Your day at a glance</h2><p class="alt-description">Five stops, one easy-going day. The route, spending, and stops below all describe the same plan.</p><div id="overview-metrics" class="metric-grid"></div>
+      </section>
+      <section id="view-map" class="view view-alternate" role="tabpanel" aria-labelledby="tab-map" hidden>
+        <h2>Route order</h2><p class="alt-description">Schematic only — not a map or verified route. Connect a real mapping service and verified coordinates in production.</p><div id="schematic-route" class="map-schematic"></div>
+      </section>
+    </section>
+
+    <section class="schedule" aria-labelledby="schedule-title">
+      <div class="section-heading"><h2 id="schedule-title"><svg class="icon"><use href="#calendar"/></svg> Day 1 itinerary</h2><div class="schedule-metadata"><span><svg class="icon"><use href="#clock"/></svg> ~8 hrs planned</span><span class="meta-separator" aria-hidden="true"></span><span><svg class="icon"><use href="#car"/></svg> 35 min transfers*</span></div></div>
+      <ol id="stop-list" class="stop-list" aria-label="Scheduled itinerary stops"></ol>
+    </section>
+
+    <section class="budget-panel" aria-labelledby="budget-title">
+      <div class="budget-heading"><h2 id="budget-title"><svg class="icon"><use href="#coins"/></svg> Budget summary</h2><p>Estimated: <strong id="budget-total">₱1,350</strong> <span>/ ₱1,500</span></p></div>
+      <div class="meter" role="progressbar" aria-label="Proportion of budget used" aria-valuemin="0" aria-valuemax="1500" aria-valuenow="1350" id="budget-meter"><span id="meter-fill"></span></div>
+      <div class="budget-footer"><span class="remaining"><svg class="icon"><use href="#info"/></svg> <span id="budget-remain">₱150 remaining before transport</span></span><button class="quiet-link" type="button" data-action="budget">What's included?</button></div>
+    </section>
+
+    <section class="tips-panel" aria-labelledby="tips-title">
+      <h2 id="tips-title"><svg class="icon"><use href="#spark"/></svg> From your travel buddy</h2>
+      <div class="tips-grid">
+        <div class="tip"><svg class="icon"><use href="#clock"/></svg><div><h3>Good time to go</h3><p>Start early for a less rushed day.</p></div></div>
+        <div class="tip"><svg class="icon"><use href="#car"/></svg><div><h3>Getting around</h3><p>Check actual traffic and fares before leaving.</p></div></div>
+        <div class="tip"><svg class="icon"><use href="#tune"/></svg><div><h3>Make it yours</h3><p>Want more food spots or fewer transfers?</p></div></div>
+      </div>
+    </section>
+
+    <div class="actions" aria-label="Itinerary actions">
+      <button type="button" class="action primary" data-action="save"><svg class="icon"><use href="#bookmark"/></svg> Save plan</button>
+      <button type="button" class="action" data-action="refine"><svg class="icon"><use href="#tune"/></svg> Refine</button>
+      <button type="button" class="action" data-action="share"><svg class="icon"><use href="#share"/></svg> Share plan</button>
+    </div>
+    <p class="reference-note">Illustrative content only · Stop prices, venues, times, and travel estimates have not been verified. Transport is excluded from the displayed total.</p>
+  </main>
+
+  <div id="overlay" class="overlay" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div class="sheet-head"><h2 id="sheet-title"></h2><button type="button" class="close" id="close-sheet" aria-label="Close dialog"><svg class="icon"><use href="#x"/></svg></button></div>
+      <div id="sheet-body" class="sheet-body"></div>
+    </div>
+  </div>
+  <div id="live-feedback" class="sr-only" role="status" aria-live="polite"></div>
+  <script src="script.js"></script>
+</body>
+</html>

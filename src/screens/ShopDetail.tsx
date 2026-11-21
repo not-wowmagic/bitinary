@@ -1,4 +1,4 @@
-import { CalendarPlus, Clock, ExternalLink, Flag, MapPin, MoreHorizontal, PenLine, Phone, Share, Star, Tag, Wallet } from 'lucide-react'
+import { CalendarPlus, Clock, ExternalLink, Flag, MapPin, MoreHorizontal, Navigation, PenLine, Phone, Share, Star, Tag, Wallet } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import Dropdown from 'react-bootstrap/Dropdown'
 import Nav from 'react-bootstrap/Nav'
@@ -6,6 +6,7 @@ import Placeholder from 'react-bootstrap/Placeholder'
 import Tab from 'react-bootstrap/Tab'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { useAccount } from '@/app/account'
+import { useLang } from '@/app/i18n'
 import { useBusinessFeed } from '@/app/social'
 import { useStore } from '@/app/store'
 import { AddToItinerarySheet } from '@/components/AddToItinerarySheet'
@@ -27,6 +28,7 @@ import { reels } from '@/data/reels'
 import { cn } from '@/lib/cn'
 import { getForcedState } from '@/lib/forced'
 import { img, peso } from '@/lib/format'
+import { googleMapsDirectionsUrl } from '@/lib/maps'
 import { useMediaQuery } from '@/lib/useMedia'
 import { DatabaseBusinessProfile } from './DatabaseBusinessProfile'
 
@@ -372,6 +374,10 @@ function LoadingCards() {
 
 function About({ place }: { place: Place }) {
   const navigate = useNavigate()
+  const { t } = useLang()
+  const directionsUrl = googleMapsDirectionsUrl(
+    `${place.name}, ${place.area}, Manila, Philippines`,
+  )
   return (
     <div className="space-y-4">
       <p className="text-body">{place.description}</p>
@@ -394,9 +400,22 @@ function About({ place }: { place: Place }) {
             <p className="truncate font-display text-[15px] font-semibold">{place.area}, Maynila</p>
             <p className="text-caption text-fg-2">{place.distance} mula sa iyo</p>
           </div>
-          <Button size="sm" variant="secondary" icon={<MapPin size={16} />} onClick={() => navigate('/moments/map')}>
-            Mapa
-          </Button>
+          <div className="flex shrink-0 gap-2">
+            <Button size="sm" variant="secondary" icon={<MapPin size={16} />} onClick={() => navigate('/moments/map')}>
+              Mapa
+            </Button>
+            {directionsUrl && (
+              <a
+                href={directionsUrl}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Find route"
+                className="inline-flex h-10 items-center gap-2 rounded-full bg-primary px-3 font-display text-sm font-semibold text-ink"
+              >
+                <Navigation size={16} /> {t('Hanapin ang ruta', 'Find route')}
+              </a>
+            )}
+          </div>
         </div>
       </div>
       <dl className="overflow-hidden rounded-[20px] bg-surface text-body shadow-card">

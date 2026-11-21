@@ -130,7 +130,7 @@ export function HomeHeader() {
             </span>
           </button>
           <div className="flex gap-1.5">
-            <HeaderButton label={t('Mga abiso', 'Notifications')} onClick={() => setSheet('notif')} badge>
+            <HeaderButton label={t('Mga abiso', 'Notifications')} onClick={() => setSheet('notif')}>
               <Bell size={21} strokeWidth={1.75} />
             </HeaderButton>
             <HeaderButton label={t('Naka-save', 'Saved')} onClick={() => setSheet('saved')}>
@@ -175,7 +175,7 @@ export function HomeHeader() {
   )
 }
 
-function HeaderButton({ children, label, onClick, badge }: { children: ReactNode; label: string; onClick: () => void; badge?: boolean }) {
+function HeaderButton({ children, label, onClick }: { children: ReactNode; label: string; onClick: () => void }) {
   return (
     <motion.button
       whileTap={{ scale: 0.92 }}
@@ -184,7 +184,6 @@ function HeaderButton({ children, label, onClick, badge }: { children: ReactNode
       className="relative flex h-11 w-11 items-center justify-center rounded-full bg-white/25 text-ink"
     >
       {children}
-      {badge && <span className="absolute right-2.5 top-2.5 h-2.5 w-2.5 rounded-full bg-amber ring-2 ring-primary" />}
     </motion.button>
   )
 }

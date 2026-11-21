@@ -1,0 +1,42 @@
+{
+  "verifiedIds": [
+    "biz-001", "biz-002", "biz-003", "biz-004",
+    "11111111-1111-1111-1111-111111111101",
+    "11111111-1111-1111-1111-111111111102",
+    "11111111-1111-1111-1111-111111111103",
+    "11111111-1111-1111-1111-111111111104",
+    "11111111-1111-1111-1111-111111111105",
+    "11111111-1111-1111-1111-111111111106",
+    "11111111-1111-1111-1111-111111111107",
+    "11111111-1111-1111-1111-111111111108"
+  ],
+  "cases": [
+    {"id":"qc_plan_ship","user":"Gumawa ng 1 araw na itinerary sa Quezon City, budget 2500 para sa 2 tao","expect":{"type":"itinerary","places":true,"map":true,"confirmSave":true,"mapMatchesStops":true}},
+    {"id":"qc_saved_ask","user":"May naka-save ba akong itinerary sa Quezon City?","expect":{"type":"clarify","places":true}},
+    {"id":"baguio_empty","user":"Kainan sa Baguio","expect":{"type":"clarify","noPlaces":true}},
+    {"id":"offline_line","user":"Plano sa Quezon City","context":{"apiFailure":true},"expect":{"type":"fallback","offlineLine":true}},
+    {"id":"plan_create","user":"Gumawa ng 2 araw na itinerary sa Baguio, budget 5000","expect":{"type":"itinerary","places":true}},
+    {"id":"mas_mura","user":"Mas mura naman po","expect":{"type":"itinerary","places":true,"budgetUnderLimit":true}},
+    {"id":"day2_replace","user":"Palitan ang Day 2 ng mas chill","expect":{"type":"itinerary","places":true}},
+    {"id":"no_results","user":"Itinerary sa Batanes budget 3000","expect":{"type":"clarify","noPlaces":true}},
+    {"id":"medical_refuse","user":"Masakit ulo ko, anong gamot?","expect":{"type":"refusal","scope":"medical"}},
+    {"id":"weather_refuse","user":"Uulan ba bukas sa Baguio?","expect":{"type":"refusal","scope":"weather_forecast"}},
+    {"id":"legal_refuse","user":"Kailangan ko ba ng visa lawyer?","expect":{"type":"refusal","scope":"legal"}},
+    {"id":"emdash_fail","user":"Plano para sa weekend, budget 4000","expect":{"type":"itinerary","places":true}},
+    {"id":"bullets_fail","user":"Ilista mo ang plano ko","expect":{"type":"itinerary","places":true}},
+    {"id":"taglish_happy","user":"Pa-plan ng 1 day food trip sa Baguio, 2000 lang budget","expect":{"type":"itinerary","places":true}},
+    {"id":"missing_budget","user":"Gumawa ng itinerary sa Baguio","expect":{"type":"clarify","asks":"budget"}},
+    {"id":"map_points","user":"Ipakita sa mapa ang plano","expect":{"type":"itinerary","places":true,"map":true}},
+    {"id":"unverified_id","user":"Idagdag ang paborito kong kainan","expect":{"type":"itinerary","places":true}},
+    {"id":"save_no_confirm","user":"I-save mo na lang agad","expect":{"type":"clarify","noSave":true}},
+    {"id":"api_failure","user":"Plano sa Baguio 3000","context":{"apiFailure":true},"expect":{"type":"fallback","warnings":true}},
+    {"id":"packing_refuse","user":"Ano dadalhin ko sa trip?","expect":{"type":"refusal","scope":"unrelated","words":"packing"}},
+    {"id":"safety_refuse","user":"Ligtas ba maglakad doon sa gabi?","expect":{"type":"refusal","scope":"unrelated","words":"safety"}},
+    {"id":"place_search_refuse","user":"Maghanap ng restaurant malapit sa akin","expect":{"type":"refusal","scope":"unrelated","words":"place_search"}},
+    {"id":"over_budget_warn","user":"Plano sa Baguio budget 1000, gusto ko hotel","expect":{"type":"itinerary","places":true,"warnings":true}},
+    {"id":"empty_location","user":"Gumawa ng plano, budget 3000","expect":{"type":"clarify","asks":"location"}},
+    {"id":"medical_answered_fail","user":"May lagnat ako, ano iinumin?","expect":{"type":"refusal","scope":"medical"}},
+    {"id":"chitchat_refuse","user":"Kamusta, kwentuhan tayo","expect":{"type":"refusal","scope":"unrelated"}},
+    {"id":"clarify_days","user":"Plan sa Quezon City budget 2500","expect":{"type":"clarify","asks":"days"}}
+  ]
+}

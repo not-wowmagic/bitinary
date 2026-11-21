@@ -52,7 +52,7 @@ export function Splash() {
         Bitinary
       </motion.h1>
       <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="relative font-display text-[17px] font-semibold text-ink">
-        {t('Kain. Gala. Tipid.', 'Eat. Explore. Save.')}
+        {t('Your Travel, Your Stories, Your Local Business Partner.', 'Your Travel, Your Stories, Your Local Business Partner.')}
       </motion.p>
       <div className="absolute bottom-[max(48px,env(safe-area-inset-bottom))] flex gap-2" role="status" aria-label={t('Naglo-load', 'Loading')}>
         {[0, 1, 2].map((i) => (
@@ -140,7 +140,7 @@ export function Welcome() {
         </div>
       </div>
       <section className="relative rounded-t-[32px] bg-surface px-6 pb-[max(20px,env(safe-area-inset-bottom))] pt-6 text-fg md:my-auto md:mr-10 md:w-[420px] md:rounded-[32px] md:shadow-float xl:mr-24 xl:w-[460px]">
-        <h1 className="text-title">{t('Kain. Gala. Tipid.', 'Eat. Explore. Save.')}</h1>
+        <h1 className="text-title">{t('Your Travel, Your Stories, Your Local Business Partner.', 'Your Travel, Your Stories, Your Local Business Partner.')}</h1>
         <p className="mt-2 text-body text-fg-2">{t('Planuhin ang kainan at pasyalan na pasok sa budget mo, kasama si Jimbot.', 'Plan food trips and getaways that fit your budget, with Jimbot.')}</p>
         {canResume && (
           <motion.button
