@@ -11,6 +11,9 @@ begin
     'reviews'
   ]
   loop
+    if to_regclass(format('public.%I', table_name)) is null then
+      continue;
+    end if;
     if not exists (
       select 1
       from pg_publication_tables

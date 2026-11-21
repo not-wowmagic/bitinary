@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "JimbotResponse",
+  "description": "Structured Jimbot reply. Strict-mode friendly: every key required, use null or [] when unused. businessId values must come from tool results.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["message", "quickReplies", "places", "itineraryDraft", "budget", "map", "actions", "warnings", "refusal"],
+  "properties": {
+    "message": {
+      "type": "string",
+      "description": "Chat text. Taglish, 1 to 2 short sentences, no em dashes, no lists or markdown, max 1 emoji.",
+      "maxLength": 240
+    },
+    "quickReplies": {
+      "type": "array",
+      "maxItems": 4,
+      "items": { "type": "string", "maxLength": 25 }
+    },
+    "places": {
+      "type": "array",
+      "description": "Verified business cards. UI hydrates photo/address from DB by businessId.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["businessId", "reason"],
+        "properties": {
+          "businessId": { "type": "string" },
+          "reason": { "type": ["string", "null"], "maxLength": 80 }
+        }
+      }
+    },
+    "itineraryDraft": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["title", "area", "days"],
+      "properties": {
+        "title": { "type": "string" },
+        "area": { "type": ["string", "null"] },
+        "days": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["day", "stops"],
+            "properties": {
+              "day": { "type": "integer", "minimum": 1 },
+              "stops": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["time", "businessId", "note", "estCost"],
+                  "properties": {
+                    "time": { "type": ["string", "null"], "description": "HH:MM 24h" },
+                    "businessId": { "type": "string" },
+                    "note": { "type": ["string", "null"], "maxLength": 80 },
+                    "estCost": { "type": ["number", "null"], "minimum": 0 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "budget": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["currency", "limit", "total", "perPerson", "isEstimate", "lines"],
+      "properties": {
+        "currency": { "type": "string", "enum": ["PHP"] },
+        "limit": { "type": ["number", "null"], "minimum": 0, "description": "User's stated budget" },
+        "total": { "type": "number", "minimum": 0 },
+        "perPerson": { "type": ["number", "null"], "minimum": 0 },
+        "isEstimate": { "type": "boolean" },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "amount", "businessId"],
+            "properties": {
+              "label": { "type": "string" },
+              "amount": { "type": "number", "minimum": 0 },
+              "businessId": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "map": {
+      "type": ["object", "null"],
+      "description": "Pins by businessId; coordinates come from DB, never from the model.",
+      "additionalProperties": false,
+      "required": ["businessIds"],
+      "properties": {
+        "businessIds": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "label", "businessId"],
+        "properties": {
+          "type": { "type": "string", "enum": ["confirm_save", "revise_cheaper", "open_business", "open_map"] },
+          "label": { "type": "string", "maxLength": 25 },
+          "businessId": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Short user-facing caveats, e.g. estimated prices or over budget.",
+      "items": { "type": "string", "maxLength": 100 }
+    },
+    "refusal": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["category"],
+      "properties": {
+        "category": { "type": "string", "enum": ["medical", "legal", "weather_forecast", "unrelated", "unsafe"] }
+      }
+    }
+  }
+}

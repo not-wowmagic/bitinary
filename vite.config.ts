@@ -54,6 +54,7 @@ react(),
       watch: {
         ignored: [
           '**/.figma/**',
+          '**/.tmp-cursor-reference/**',
 ],
       },
     },
