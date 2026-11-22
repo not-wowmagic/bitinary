@@ -75,7 +75,7 @@ export function LanguagePick() {
       <div className="relative flex flex-1 flex-col items-center justify-center px-6 pt-[max(24px,env(safe-area-inset-top))]">
         <div className="absolute left-5 top-[max(16px,env(safe-area-inset-top))] font-display text-[22px] font-bold text-white">Bitinary</div>
         <Jimbot expression="waving" variant="standalone" size={230} className="max-h-[34vh] w-auto md:max-h-[50vh]" />
-        <p className="mt-2 rounded-full bg-ink/85 px-4 py-1.5 font-display text-[14px] font-semibold text-cream">Kumusta! · Hello!</p>
+        <p className="mt-2 rounded-full bg-ink/85 px-4 py-1.5 font-display text-[14px] font-semibold text-cream">{en ? 'Hello!' : 'Kumusta!'}</p>
       </div>
       <section className="relative rounded-t-[32px] bg-surface px-6 pb-[max(20px,env(safe-area-inset-bottom))] pt-6 text-fg md:my-auto md:mr-10 md:w-[420px] md:rounded-[32px] md:shadow-float xl:mr-24 xl:w-[460px]">
         <div className="flex items-center gap-2 text-link">
@@ -84,7 +84,7 @@ export function LanguagePick() {
         </div>
         <h1 className="mt-1 text-title">{en ? 'Choose your language' : 'Pumili ng wika'}</h1>
         <p className="mt-1 text-body text-fg-2">{en ? 'You can change this anytime in Account.' : 'Puwede mo itong palitan anumang oras sa Account.'}</p>
-        <div className="mt-5 space-y-3" role="radiogroup" aria-label="Wika / Language">
+        <div className="mt-5 space-y-3" role="radiogroup" aria-label={en ? 'Language' : 'Wika'}>
           <SelectCard selected={pick === 'tl'} onClick={() => setPick('tl')} icon={<span className="font-display text-[18px] font-bold">TL</span>} title="Tagalog" body="Gamitin ang Bitinary sa Tagalog" />
           <SelectCard selected={pick === 'en'} onClick={() => setPick('en')} icon={<span className="font-display text-[18px] font-bold">EN</span>} title="English" body="Use Bitinary in English" />
         </div>
